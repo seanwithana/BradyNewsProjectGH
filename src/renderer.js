@@ -14,6 +14,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
 
     if (btn.dataset.tab === 'news-feed') refreshFeed();
+    if (btn.dataset.tab === 'all-news') refreshAllNews();
     if (btn.dataset.tab === 'keyword-filters') refreshRulesets();
     if (btn.dataset.tab === 'llm-analysis') { populateLLMRulesetFilter(); refreshLLMQueue(); }
   });
@@ -323,6 +324,58 @@ function renderScoreBar(value, key) {
   return `<span class="llm-score">${value}/${max}</span>
     <span class="llm-score-bar"><span class="llm-score-fill" style="width:${pct}%;background:${color}"></span></span>`;
 }
+
+// ── All News Tab ──
+
+async function refreshAllNews() {
+  const filters = {};
+  const search = document.getElementById('allnews-search').value.trim();
+  if (search) filters.search = search;
+  const ticker = document.getElementById('allnews-ticker').value.trim();
+  if (ticker) filters.ticker = ticker;
+  const preset = document.getElementById('allnews-time-preset').value;
+  if (preset) {
+    const ms = { '1h': 3600000, '6h': 21600000, '1d': 86400000, '1w': 604800000 }[preset];
+    if (ms) filters.startTime = new Date(Date.now() - ms).toISOString().replace('T', ' ').slice(0, 19);
+  }
+
+  const items = await window.api.getAllNews(filters);
+  const list = document.getElementById('all-news-list');
+
+  if (!items || items.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div>No news items collected yet</div><div style="font-size:12px">Waiting for Discord scraper to receive messages...</div></div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(item => {
+    let text = escapeHtml(item.text);
+    text = formatDiscordText(text);
+    const urls = safeParseJSON(item.urls_json, []);
+
+    return `
+      <div class="news-card" style="border-left-color: var(--accent)">
+        <div class="news-card-header">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
+            ${item.market_cap_raw ? `<span class="market-cap-badge">MC: ${escapeHtml(item.market_cap_raw)}</span>` : ''}
+            ${item.country_iso2 ? `<span class="country-badge">${escapeHtml(item.country_iso2)}</span>` : ''}
+          </div>
+          <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
+        </div>
+        <div class="news-card-body">${text}</div>
+        ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
+        <div class="news-card-timestamps">
+          <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
+          <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+document.getElementById('allnews-refresh').addEventListener('click', refreshAllNews);
+document.getElementById('allnews-search-btn').addEventListener('click', refreshAllNews);
+document.getElementById('allnews-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshAllNews(); });
+document.getElementById('allnews-time-preset').addEventListener('change', refreshAllNews);
 
 // ── Keyword Filters ──
 async function refreshRulesets() {

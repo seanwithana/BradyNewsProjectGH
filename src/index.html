@@ -10,6 +10,7 @@
   <div id="app">
     <nav class="tab-bar">
       <button class="tab-btn active" data-tab="news-feed">News Feeds</button>
+      <button class="tab-btn" data-tab="all-news">All News</button>
       <button class="tab-btn" data-tab="keyword-filters">Keyword Filters</button>
       <button class="tab-btn" data-tab="llm-analysis">LLM Analysis</button>
       <div class="stats-bar">
@@ -48,6 +49,27 @@
         </div>
       </div>
       <div id="news-feed-list" class="feed-list"></div>
+    </div>
+
+    <div id="tab-all-news" class="tab-content">
+      <div class="feed-toolbar">
+        <div class="search-group">
+          <input type="text" id="allnews-search" placeholder="Search all news..." />
+          <button id="allnews-search-btn" class="btn btn-primary">Search</button>
+        </div>
+        <div class="filter-group">
+          <input type="text" id="allnews-ticker" placeholder="Ticker..." />
+          <select id="allnews-time-preset">
+            <option value="">All time</option>
+            <option value="1h">Last hour</option>
+            <option value="6h">Last 6 hours</option>
+            <option value="1d">Last 24 hours</option>
+            <option value="1w">Last week</option>
+          </select>
+          <button id="allnews-refresh" class="btn btn-primary">Refresh</button>
+        </div>
+      </div>
+      <div id="all-news-list" class="feed-list"></div>
     </div>
 
     <div id="tab-keyword-filters" class="tab-content">

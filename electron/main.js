@@ -227,6 +227,11 @@ ipcMain.handle('get-llm-result', (_, newsItemId) => {
   return database.getLLMResult(newsItemId);
 });
 
+// All News
+ipcMain.handle('get-all-news', (_, filters) => {
+  return database.getAllNewsItems(filters || {});
+});
+
 // Stats
 ipcMain.handle('get-stats', () => {
   return database.getStats();

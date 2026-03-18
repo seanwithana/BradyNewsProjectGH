@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('api', {
   getLLMResult: (newsItemId) => ipcRenderer.invoke('get-llm-result', newsItemId),
   getLLMStats: () => ipcRenderer.invoke('get-llm-stats'),
 
+  // All News
+  getAllNews: (filters) => ipcRenderer.invoke('get-all-news', filters),
+
   // Stats
   getStats: () => ipcRenderer.invoke('get-stats'),
 

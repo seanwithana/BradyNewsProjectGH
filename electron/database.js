@@ -171,6 +171,18 @@ class BradyDatabase {
     return row ? row.latest : null;
   }
 
+  getAllNewsItems(filters = {}) {
+    let where = ['1=1'];
+    let params = [];
+    if (filters.search) { where.push('text LIKE ?'); params.push(`%${filters.search}%`); }
+    if (filters.ticker) { where.push('ticker_symbol LIKE ?'); params.push(`%${filters.ticker}%`); }
+    if (filters.startTime) { where.push('ingested_at >= ?'); params.push(filters.startTime); }
+    const limit = filters.limit || 300;
+    return this.db.prepare(`
+      SELECT * FROM news_items WHERE ${where.join(' AND ')} ORDER BY ingested_at DESC LIMIT ?
+    `).all(...params, limit);
+  }
+
   getNewsItemsSince(timestamp) {
     return this.db.prepare(
       'SELECT * FROM news_items WHERE ingested_at >= ? ORDER BY ingested_at DESC'
