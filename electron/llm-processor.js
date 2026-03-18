@@ -18,9 +18,14 @@ class LLMProcessor {
     this.pollIntervalMs = 2000;
 
     // Ollama config — can be swapped for a cloud API later
+    let config = {};
+    try {
+      const cfgPath = path.join(__dirname, '..', 'config.json');
+      if (fs.existsSync(cfgPath)) config = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    } catch(e) {}
     this.provider = 'ollama';
-    this.ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
-    this.model = process.env.OLLAMA_MODEL || 'qwen3:32b';
+    this.ollamaHost = process.env.OLLAMA_HOST || config.ollama_host || 'http://localhost:11434';
+    this.model = process.env.OLLAMA_MODEL || config.ollama_model || 'qwen3:32b';
   }
 
   start() {
