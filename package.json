@@ -1,0 +1,19 @@
+{
+  "name": "brady-news-project",
+  "version": "1.0.0",
+  "description": "Multi-source news aggregation with keyword filtering, LLM analysis, and Discord scraping",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "npx @electron/rebuild"
+  },
+  "dependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "better-sqlite3": "^11.7.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

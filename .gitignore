@@ -1,0 +1,10 @@
+node_modules/
+data/brady-news.db
+data/brady-news.db-wal
+data/brady-news.db-shm
+data/audio/*
+!data/audio/.gitkeep
+data/*.log
+.env
+config.json
+package-lock.json

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brady News Project</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="news-feed">News Feeds</button>
+      <button class="tab-btn" data-tab="keyword-filters">Keyword Filters</button>
+      <button class="tab-btn" data-tab="llm-analysis">LLM Analysis</button>
+      <div class="stats-bar">
+        <span id="stat-total">0 items</span>
+        <span id="stat-feed">0 in feed</span>
+        <span id="stat-rulesets">0 rulesets</span>
+        <span id="stat-llm">0 in LLM queue</span>
+      </div>
+    </nav>
+
+    <div id="tab-news-feed" class="tab-content active">
+      <div class="feed-toolbar">
+        <div class="search-group">
+          <input type="text" id="feed-search" placeholder="Search news..." />
+          <button id="feed-search-btn" class="btn btn-primary">Search</button>
+          <button id="feed-clear-btn" class="btn btn-secondary">Clear</button>
+        </div>
+        <div class="filter-group">
+          <input type="text" id="feed-ticker" placeholder="Ticker filter..." />
+          <select id="feed-time-preset">
+            <option value="">All time</option>
+            <option value="15m">Last 15 min</option>
+            <option value="1h">Last hour</option>
+            <option value="6h">Last 6 hours</option>
+            <option value="12h">Last 12 hours</option>
+            <option value="1d">Last 24 hours</option>
+            <option value="1w">Last week</option>
+            <option value="custom">Custom range...</option>
+          </select>
+          <input type="datetime-local" id="feed-start-time" class="hidden" />
+          <input type="datetime-local" id="feed-end-time" class="hidden" />
+          <select id="feed-ruleset-filter">
+            <option value="">All rulesets</option>
+          </select>
+          <button id="feed-refresh" class="btn btn-primary">Refresh</button>
+        </div>
+      </div>
+      <div id="news-feed-list" class="feed-list"></div>
+    </div>
+
+    <div id="tab-keyword-filters" class="tab-content">
+      <div class="filters-layout">
+        <div class="rulesets-panel">
+          <div class="panel-header">
+            <h2>Keyword Rulesets</h2>
+            <button id="add-ruleset-btn" class="btn btn-primary">+ New Ruleset</button>
+          </div>
+          <div id="rulesets-list" class="rulesets-list"></div>
+        </div>
+
+        <div class="ruleset-editor-panel" id="ruleset-editor" style="display:none;">
+          <div class="panel-header">
+            <h2 id="editor-title">New Ruleset</h2>
+            <div>
+              <button id="save-ruleset-btn" class="btn btn-primary">Save</button>
+              <button id="cancel-ruleset-btn" class="btn btn-secondary">Cancel</button>
+            </div>
+          </div>
+
+          <div class="editor-form">
+            <div class="form-row">
+              <label>Name</label>
+              <input type="text" id="ruleset-name" placeholder="Ruleset name..." />
+            </div>
+
+            <div class="form-row">
+              <label>Highlight Color</label>
+              <div class="color-picker-row">
+                <input type="color" id="ruleset-color" value="#ff6b6b" />
+                <span id="color-preview" class="color-preview" style="background:#ff6b6b"></span>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label>Alert Sound</label>
+              <div class="audio-row">
+                <button id="select-audio-btn" class="btn btn-secondary">Choose Audio File</button>
+                <span id="audio-file-name">No file selected</span>
+                <button id="clear-audio-btn" class="btn btn-small btn-danger" style="display:none;">×</button>
+                <button id="test-audio-btn" class="btn btn-small btn-secondary" style="display:none;">Test</button>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="section-header">
+                <h3>Match Rules</h3>
+                <button id="add-group-btn" class="btn btn-small btn-primary">+ Add Group</button>
+              </div>
+              <div id="rule-groups-container"></div>
+              <p class="hint">Each group has its own AND/OR logic. Groups are combined with OR — if <em>any</em> group matches, the ruleset triggers.<br>
+              Example: <code>(merger AND acquisition) OR (buyout) OR (takeover AND hostile)</code></p>
+            </div>
+
+            <div class="form-section">
+              <div class="section-header">
+                <h3>Exclusion Rules</h3>
+                <button id="add-exclusion-btn" class="btn btn-small btn-primary">+ Add Exclusion</button>
+              </div>
+              <div id="exclusions-list" class="rules-list"></div>
+              <p class="hint">News containing any exclusion keyword will be filtered out.</p>
+            </div>
+
+            <div class="form-section">
+              <div class="section-header">
+                <h3>LLM Analysis</h3>
+                <label class="switch">
+                  <input type="checkbox" id="llm-enabled" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div id="llm-options" style="display:none">
+                <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
+                  <label style="min-width:100px;padding-top:8px">System Prompt</label>
+                  <textarea id="llm-prompt" rows="3" placeholder="Instructions for the LLM on how to analyze the news.&#10;&#10;Example: 'You are a financial news analyst. Analyze the following news item and assess its potential market impact.'" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+                </div>
+                <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
+                  <label style="min-width:100px;padding-top:8px">Output Format</label>
+                  <textarea id="llm-output-format" rows="4" placeholder="Describe the desired output structure.&#10;&#10;Example:&#10;Return a JSON object with: sentiment (bullish/bearish/neutral), impact_score (1-10), summary (2-3 sentences), key_entities (array of company/person names), and action_items (array of notable takeaways)." style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+                </div>
+                <p class="hint">The news text will be sent along with your system prompt and output format instructions to the cloud LLM API. Configure the API endpoint in Settings (coming soon).</p>
+
+                <div class="llm-scoring-section" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <span style="font-size:13px;font-weight:600;color:var(--text-secondary)">LLM Scoring Gate</span>
+                    <label class="switch">
+                      <input type="checkbox" id="llm-scoring-enabled" />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                  <div id="llm-scoring-options" style="display:none">
+                    <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
+                      <label style="min-width:100px;padding-top:8px">Scoring Criteria</label>
+                      <textarea id="llm-scoring-criteria" rows="3" placeholder="Describe what the LLM should score and how.&#10;&#10;Example: 'Score this news item from -1000 to 1000 based on how likely it is to cause a significant price movement. Positive = bullish, negative = bearish. Return ONLY a JSON object with: score (integer -1000 to 1000), reasoning (1 sentence).'" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+                    </div>
+                    <div class="form-row" style="margin-bottom:4px">
+                      <label style="min-width:100px">Threshold</label>
+                      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+                        <div style="display:flex;align-items:center;gap:10px">
+                          <span class="llm-slider-label" style="color:var(--danger)">-1000</span>
+                          <input type="range" id="llm-scoring-threshold" min="-1000" max="1000" value="0" class="llm-slider" />
+                          <span class="llm-slider-label" style="color:var(--success)">1000</span>
+                          <span id="llm-threshold-value" class="llm-threshold-badge">0</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="hint">Only news items scored at or above this threshold will appear in the News Feeds tab. Items below the threshold are still stored but hidden from the feed.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="section-header">
+                <h3>Reprocess Historical</h3>
+              </div>
+              <div class="reprocess-row">
+                <select id="reprocess-period">
+                  <option value="1h">Last hour</option>
+                  <option value="6h">Last 6 hours</option>
+                  <option value="12h">Last 12 hours</option>
+                  <option value="1d">Last day</option>
+                  <option value="1w">Last week</option>
+                </select>
+                <button id="reprocess-btn" class="btn btn-warning">Reprocess</button>
+                <span id="reprocess-status"></span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-llm-analysis" class="tab-content">
+      <div class="llm-tab-layout">
+        <div class="llm-list-panel">
+          <div class="feed-toolbar" style="border-bottom:1px solid var(--border)">
+            <div class="filter-group">
+              <select id="llm-status-filter">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+              </select>
+              <select id="llm-ruleset-filter">
+                <option value="">All rulesets</option>
+              </select>
+              <button id="llm-refresh-btn" class="btn btn-primary">Refresh</button>
+            </div>
+          </div>
+          <div id="llm-queue-list" class="feed-list"></div>
+        </div>
+        <div class="llm-detail-panel" id="llm-detail-panel">
+          <div class="empty-state">
+            <div>Select an item to view LLM response</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="alert-audio" preload="auto"></audio>
+  <script src="renderer.js"></script>
+</body>
+</html>
