@@ -14,7 +14,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
 
     if (btn.dataset.tab === 'news-feed') refreshFeed();
-    if (btn.dataset.tab === 'all-news') refreshAllNews();
+    if (btn.dataset.tab === 'all-news') { refreshAllNews(); refreshDiscordStatus(); }
     if (btn.dataset.tab === 'keyword-filters') refreshRulesets();
     if (btn.dataset.tab === 'llm-analysis') { populateLLMRulesetFilter(); refreshLLMQueue(); }
   });
@@ -372,7 +372,22 @@ async function refreshAllNews() {
   }).join('');
 }
 
-document.getElementById('allnews-refresh').addEventListener('click', refreshAllNews);
+async function refreshDiscordStatus() {
+  const s = await window.api.getDiscordStatus();
+  const bar = document.getElementById('discord-status-bar');
+  bar.innerHTML = `
+    <span class="discord-status-dot ${s.status}"></span>
+    <span class="discord-status-label">${escapeHtml(s.message || s.status)}</span>
+    <div class="discord-status-stats">
+      <span>Messages seen: <strong>${s.messagesReceived}</strong></span>
+      <span>Items ingested: <strong>${s.itemsIngested}</strong></span>
+      ${s.lastMessageAt ? `<span>Last msg: ${formatTimestamp(s.lastMessageAt)}</span>` : ''}
+      ${s.botUser ? `<span>Bot: ${escapeHtml(s.botUser.tag)}</span>` : ''}
+    </div>
+  `;
+}
+
+document.getElementById('allnews-refresh').addEventListener('click', () => { refreshAllNews(); refreshDiscordStatus(); });
 document.getElementById('allnews-search-btn').addEventListener('click', refreshAllNews);
 document.getElementById('allnews-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshAllNews(); });
 document.getElementById('allnews-time-preset').addEventListener('change', refreshAllNews);
@@ -1072,3 +1087,10 @@ refreshFeed();
 refreshRulesets();
 refreshStats();
 refreshLLMStats();
+
+// Auto-refresh discord status every 5s when All News tab is active
+setInterval(() => {
+  if (document.querySelector('.tab-btn[data-tab="all-news"]').classList.contains('active')) {
+    refreshDiscordStatus();
+  }
+}, 5000);

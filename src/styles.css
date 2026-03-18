@@ -921,6 +921,53 @@ input[type="text"]:focus, select:focus, input[type="datetime-local"]:focus {
   overflow-y: auto;
 }
 
+/* Discord Status Bar */
+.discord-status-bar {
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.discord-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.discord-status-dot.connected { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+.discord-status-dot.connecting, .discord-status-dot.reconnecting { background: #fbbf24; animation: pulse 1.5s infinite; }
+.discord-status-dot.disconnected, .discord-status-dot.error, .discord-status-dot.failed, .discord-status-dot.disabled { background: #f87171; }
+.discord-status-dot.not\ started { background: #6a6a88; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.discord-status-label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.discord-status-stats {
+  color: var(--text-muted);
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.discord-status-stats span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }

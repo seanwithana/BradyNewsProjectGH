@@ -227,6 +227,12 @@ ipcMain.handle('get-llm-result', (_, newsItemId) => {
   return database.getLLMResult(newsItemId);
 });
 
+// Discord status
+ipcMain.handle('get-discord-status', () => {
+  if (discordScraper) return discordScraper.getStatus();
+  return { status: 'disabled', message: 'No bot token configured', messagesReceived: 0, itemsIngested: 0 };
+});
+
 // All News
 ipcMain.handle('get-all-news', (_, filters) => {
   return database.getAllNewsItems(filters || {});

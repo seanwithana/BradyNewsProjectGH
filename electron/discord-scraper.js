@@ -41,6 +41,12 @@ class DiscordScraper {
   }
 
   start() {
+    this.status = 'connecting';
+    this.statusMessage = 'Connecting to Discord...';
+    this.messagesReceived = 0;
+    this.itemsIngested = 0;
+    this.lastMessageAt = null;
+
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -50,12 +56,33 @@ class DiscordScraper {
     });
 
     this.client.on('ready', () => {
+      this.status = 'connected';
+      this.statusMessage = `Connected as ${this.client.user.tag}`;
       log(`Discord bot connected as ${this.client.user.tag}`);
-      log(`Monitoring ${CHANNEL_IDS.size} channels`);
+      log(`Bot ID: ${this.client.user.id}`);
+      log(`Monitoring ${CHANNEL_IDS.size} channels: ${[...CHANNEL_IDS].join(', ')}`);
+      log(`Guilds: ${this.client.guilds.cache.map(g => `${g.name} (${g.id})`).join(', ')}`);
+
+      // Verify channel access
+      for (const chId of CHANNEL_IDS) {
+        const ch = this.client.channels.cache.get(chId);
+        if (ch) {
+          log(`Channel ${chId}: OK — #${ch.name} in ${ch.guild?.name || 'unknown guild'}`);
+        } else {
+          log(`Channel ${chId}: NOT FOUND — bot may not have access`);
+        }
+      }
     });
 
     this.client.on('messageCreate', (message) => {
-      if (!CHANNEL_IDS.has(message.channel.id)) return;
+      log(`MSG from #${message.channel.name || message.channel.id} by ${message.author.username}: ${message.content.substring(0, 80)}`);
+      this.messagesReceived++;
+      this.lastMessageAt = new Date().toISOString();
+
+      if (!CHANNEL_IDS.has(message.channel.id)) {
+        log(`  -> Ignored (channel not monitored)`);
+        return;
+      }
       if (message.author.bot && message.author.id === this.client.user.id) return;
 
       try {
@@ -74,11 +101,32 @@ class DiscordScraper {
       }
     });
 
+    this.client.on('warn', (msg) => {
+      log(`Discord warning: ${msg}`);
+    });
+
+    this.client.on('disconnect', () => {
+      this.status = 'disconnected';
+      this.statusMessage = 'Disconnected from Discord';
+      log('Discord disconnected');
+    });
+
+    this.client.on('reconnecting', () => {
+      this.status = 'reconnecting';
+      this.statusMessage = 'Reconnecting to Discord...';
+      log('Discord reconnecting...');
+    });
+
     this.client.on('error', (err) => {
+      this.status = 'error';
+      this.statusMessage = `Error: ${err.message}`;
       log(`Discord error: ${err.message}`);
     });
 
+    log(`Attempting login with token: ${this.token.substring(0, 10)}...`);
     this.client.login(this.token).catch(err => {
+      this.status = 'failed';
+      this.statusMessage = `Login failed: ${err.message}`;
       log(`Discord login failed: ${err.message}`);
     });
   }
@@ -88,6 +136,18 @@ class DiscordScraper {
       this.client.destroy();
       this.client = null;
     }
+  }
+
+  getStatus() {
+    return {
+      status: this.status || 'not started',
+      message: this.statusMessage || '',
+      messagesReceived: this.messagesReceived || 0,
+      itemsIngested: this.itemsIngested || 0,
+      lastMessageAt: this.lastMessageAt,
+      channels: [...CHANNEL_IDS],
+      botUser: this.client?.user ? { tag: this.client.user.tag, id: this.client.user.id } : null
+    };
   }
 
   processMessage(message) {
@@ -136,9 +196,10 @@ class DiscordScraper {
 
     const result = this.db.insertNewsItem(item);
     if (result.changes > 0) {
+      this.itemsIngested++;
       const inserted = this.db.getNewsItemBySourceKey(dedupeKey);
       if (inserted) {
-        log(`New item: ${ticker || 'N/A'} - ${text.substring(0, 80)}`);
+        log(`New item #${this.itemsIngested}: ${ticker || 'N/A'} - ${text.substring(0, 80)}`);
         this.onNewItem(inserted);
       }
     } else {
