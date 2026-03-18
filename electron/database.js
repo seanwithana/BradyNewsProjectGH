@@ -249,7 +249,7 @@ class BradyDatabase {
 
       if (ruleset.rules) {
         const insertRule = this.db.prepare(
-          'INSERT INTO keyword_rules (ruleset_id, keyword, logic_operator, rule_group) VALUES (?, ?, ?, ?)'
+          'INSERT INTO keyword_rules (ruleset_id, keyword, logic_operator, rule_group, negate) VALUES (?, ?, ?, ?, ?)'
         );
         for (const rule of ruleset.rules) {
           insertRule.run(ruleset.id, rule.keyword, rule.logic_operator || 'OR', rule.rule_group || 0, rule.negate ? 1 : 0);
