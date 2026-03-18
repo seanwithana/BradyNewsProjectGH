@@ -173,7 +173,7 @@ class BradyDatabase {
 
   getNewsItemsSince(timestamp) {
     return this.db.prepare(
-      'SELECT * FROM news_items WHERE original_timestamp >= ? ORDER BY original_timestamp DESC'
+      'SELECT * FROM news_items WHERE ingested_at >= ? ORDER BY ingested_at DESC'
     ).all(timestamp);
   }
 

@@ -141,8 +141,14 @@ class KeywordEngine {
       default:    since = new Date(now - 24 * 60 * 60 * 1000);
     }
 
+    // Format as SQLite datetime format (YYYY-MM-DD HH:MM:SS) to match ingested_at
     const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
-    const items = this.db.getNewsItemsSince(sinceStr);
+    let items = this.db.getNewsItemsSince(sinceStr);
+    // Fallback: if time-based query returns nothing, get recent items by ID
+    // This handles timezone/format mismatches on first run
+    if (!items || items.length === 0) {
+      items = this.db.db.prepare('SELECT * FROM news_items ORDER BY id DESC LIMIT 500').all();
+    }
     const results = [];
 
     for (const item of items) {
