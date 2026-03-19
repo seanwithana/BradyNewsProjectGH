@@ -48,5 +48,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   onLLMComplete: (callback) => {
     ipcRenderer.on('llm-complete', (_, data) => callback(data));
+  },
+  onNewItemIngested: (callback) => {
+    ipcRenderer.on('new-item-ingested', (_, data) => callback(data));
   }
 });

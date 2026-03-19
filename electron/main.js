@@ -30,7 +30,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 
@@ -56,6 +57,9 @@ async function initializeBackend() {
   const token = process.env.DISCORD_BOT_TOKEN || configToken;
   if (token) {
     discordScraper = new DiscordScraper(database, token, (newsItem) => {
+      // Always notify renderer of new item (for All News tab)
+      emit('new-item-ingested', { ticker: newsItem.ticker_symbol });
+
       // Process each new item through keyword engine
       const matches = keywordEngine.processItem(newsItem);
       const feedEntries = [];

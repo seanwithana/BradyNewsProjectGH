@@ -1037,6 +1037,17 @@ window.api.onLLMComplete(() => {
   refreshLLMStats();
 });
 
+window.api.onNewItemIngested(() => {
+  refreshStats();
+  if (document.querySelector('.tab-btn[data-tab="all-news"]').classList.contains('active')) {
+    refreshAllNews();
+    refreshDiscordStatus();
+  }
+  if (document.querySelector('.tab-btn[data-tab="news-feed"]').classList.contains('active')) {
+    refreshFeed();
+  }
+});
+
 // ── Utilities ──
 function escapeHtml(str) {
   if (!str) return '';
