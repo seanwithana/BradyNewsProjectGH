@@ -75,7 +75,7 @@ function renderFeedItems(items) {
     return;
   }
 
-  list.innerHTML = items.map(item => {
+  preserveScroll(list, () => { list.innerHTML = items.map(item => {
     const matchedKeywords = safeParseJSON(item.matched_keywords, []);
     let text = escapeHtml(item.text);
 
@@ -117,7 +117,7 @@ function renderFeedItems(items) {
           <span>Displayed: ${formatTimestamp(item.displayed_at)}</span>
         </div>
       </div>`;
-  }).join('');
+  }).join(''); });
 }
 
 // ── Discord Text Formatting ──
@@ -347,29 +347,31 @@ async function refreshAllNews() {
     return;
   }
 
-  list.innerHTML = items.map(item => {
-    let text = escapeHtml(item.text);
-    text = formatDiscordText(text);
-    const urls = safeParseJSON(item.urls_json, []);
+  preserveScroll(list, () => {
+    list.innerHTML = items.map(item => {
+      let text = escapeHtml(item.text);
+      text = formatDiscordText(text);
+      const urls = safeParseJSON(item.urls_json, []);
 
-    return `
-      <div class="news-card" style="border-left-color: var(--accent)">
-        <div class="news-card-header">
-          <div style="display:flex;gap:8px;align-items:center">
-            <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
-            ${item.market_cap_raw ? `<span class="market-cap-badge">MC: ${escapeHtml(item.market_cap_raw)}</span>` : ''}
-            ${item.country_iso2 ? `<span class="country-badge">${escapeHtml(item.country_iso2)}</span>` : ''}
+      return `
+        <div class="news-card" style="border-left-color: var(--accent)">
+          <div class="news-card-header">
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
+              ${item.market_cap_raw ? `<span class="market-cap-badge">MC: ${escapeHtml(item.market_cap_raw)}</span>` : ''}
+              ${item.country_iso2 ? `<span class="country-badge">${escapeHtml(item.country_iso2)}</span>` : ''}
+            </div>
+            <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
           </div>
-          <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
-        </div>
-        <div class="news-card-body">${text}</div>
-        ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
-        <div class="news-card-timestamps">
-          <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
-          <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
-        </div>
-      </div>`;
-  }).join('');
+          <div class="news-card-body">${text}</div>
+          ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
+          <div class="news-card-timestamps">
+            <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
+            <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
+          </div>
+        </div>`;
+    }).join('');
+  });
 }
 
 async function refreshDiscordStatus() {
@@ -898,24 +900,26 @@ function renderLLMQueue(items) {
     return;
   }
 
-  list.innerHTML = items.map(item => `
-    <div class="llm-queue-item status-${item.status} ${selectedLLMItemId === item.id ? 'active' : ''}" data-id="${item.id}">
-      <div class="llm-queue-item-body">
-        <div class="llm-queue-item-header">
-          <span class="llm-queue-item-ticker">${escapeHtml(item.ticker_symbol || '')}</span>
-          <span class="llm-queue-status-badge ${item.status}">${item.status}</span>
-          ${item.llm_score != null ? `<span class="llm-score-badge ${item.llm_score >= 0 ? 'positive' : 'negative'}">Score: ${item.llm_score}</span>` : ''}
-          <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${escapeHtml(item.ruleset_name || '')}</span>
-        </div>
-        <div class="llm-queue-item-preview">${escapeHtml((item.news_text || '').substring(0, 120))}</div>
-        <div class="llm-queue-item-meta">
-          <span>Queued: ${formatTimestamp(item.created_at)}</span>
-          ${item.completed_at ? `<span>Done: ${formatTimestamp(item.completed_at)}</span>` : ''}
-          ${item.model ? `<span>${escapeHtml(item.model)}</span>` : ''}
+  preserveScroll(list, () => {
+    list.innerHTML = items.map(item => `
+      <div class="llm-queue-item status-${item.status} ${selectedLLMItemId === item.id ? 'active' : ''}" data-id="${item.id}">
+        <div class="llm-queue-item-body">
+          <div class="llm-queue-item-header">
+            <span class="llm-queue-item-ticker">${escapeHtml(item.ticker_symbol || '')}</span>
+            <span class="llm-queue-status-badge ${item.status}">${item.status}</span>
+            ${item.llm_score != null ? `<span class="llm-score-badge ${item.llm_score >= 0 ? 'positive' : 'negative'}">Score: ${item.llm_score}</span>` : ''}
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${escapeHtml(item.ruleset_name || '')}</span>
+          </div>
+          <div class="llm-queue-item-preview">${escapeHtml((item.news_text || '').substring(0, 120))}</div>
+          <div class="llm-queue-item-meta">
+            <span>Queued: ${formatTimestamp(item.created_at)}</span>
+            ${item.completed_at ? `<span>Done: ${formatTimestamp(item.completed_at)}</span>` : ''}
+            ${item.model ? `<span>${escapeHtml(item.model)}</span>` : ''}
+          </div>
         </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  });
 
   list.querySelectorAll('.llm-queue-item').forEach(el => {
     el.addEventListener('click', () => {
@@ -1047,6 +1051,13 @@ window.api.onNewItemIngested(() => {
     refreshFeed();
   }
 });
+
+// ── Scroll Preservation ──
+function preserveScroll(el, fn) {
+  const scrollTop = el.scrollTop;
+  fn();
+  el.scrollTop = scrollTop;
+}
 
 // ── Utilities ──
 function escapeHtml(str) {
