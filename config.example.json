@@ -1,3 +1,12 @@
 {
-  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE"
+  "discord_bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+  "ollama_host": "http://localhost:11434",
+  "ollama_model": "qwen3:32b",
+  "api_keys": {
+    "OpenAI": "YOUR_OPENAI_KEY",
+    "Gemini": "YOUR_GEMINI_KEY",
+    "Anthropic": "YOUR_ANTHROPIC_KEY",
+    "Groq": "YOUR_GROQ_KEY",
+    "Mistral": "YOUR_MISTRAL_KEY"
+  }
 }

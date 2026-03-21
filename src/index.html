@@ -13,6 +13,7 @@
       <button class="tab-btn" data-tab="all-news">All News</button>
       <button class="tab-btn" data-tab="keyword-filters">Keyword Filters</button>
       <button class="tab-btn" data-tab="llm-analysis">LLM Analysis</button>
+      <button class="tab-btn" data-tab="api-testing">API Testing</button>
       <div class="stats-bar">
         <span id="stat-total">0 items</span>
         <span id="stat-feed">0 in feed</span>
@@ -228,6 +229,23 @@
         <div class="llm-detail-panel" id="llm-detail-panel">
           <div class="empty-state">
             <div>Select an item to view LLM response</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-api-testing" class="tab-content">
+      <div class="api-testing-layout">
+        <div class="api-testing-list">
+          <div class="panel-header">
+            <h2>Qualified News Items</h2>
+            <button id="api-testing-refresh" class="btn btn-small btn-primary">Refresh</button>
+          </div>
+          <div id="api-testing-items" class="feed-list"></div>
+        </div>
+        <div class="api-testing-detail" id="api-testing-detail">
+          <div class="empty-state">
+            <div>Select a news item to inspect</div>
           </div>
         </div>
       </div>

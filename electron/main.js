@@ -6,6 +6,8 @@ const fs = require('fs');
 const Database = require('./database');
 const KeywordEngine = require('./keyword-engine');
 const LLMProcessor = require('./llm-processor');
+const { callAPI, getProviders } = require('./api-caller');
+const { fetchAllUrls } = require('./content-fetcher');
 const DiscordScraper = require('./discord-scraper');
 
 let mainWindow;
@@ -240,6 +242,35 @@ ipcMain.handle('get-discord-status', () => {
 // All News
 ipcMain.handle('get-all-news', (_, filters) => {
   return database.getAllNewsItems(filters || {});
+});
+
+// API Testing
+ipcMain.handle('get-api-providers', () => {
+  return getProviders();
+});
+
+ipcMain.handle('extract-article-content', async (_, urlsJson) => {
+  const text = await fetchAllUrls(urlsJson);
+  return text;
+});
+
+ipcMain.handle('get-api-testing-items', () => {
+  return database.db.prepare(`
+    SELECT nf.id as feed_id, nf.news_item_id, nf.ruleset_id, nf.matched_keywords, nf.filtered_at,
+           ni.ticker_symbol, ni.text, ni.urls_json, ni.original_timestamp,
+           kr.name as ruleset_name, kr.color as ruleset_color,
+           kr.llm_enabled, kr.llm_prompt, kr.llm_output_format,
+           kr.llm_scoring_enabled, kr.llm_scoring_criteria
+    FROM news_feed nf
+    JOIN news_items ni ON nf.news_item_id = ni.id
+    JOIN keyword_rulesets kr ON nf.ruleset_id = kr.id
+    ORDER BY nf.filtered_at DESC
+    LIMIT 100
+  `).all();
+});
+
+ipcMain.handle('call-api', async (_, { provider, model, prompt, webSearch }) => {
+  return await callAPI(provider, model, prompt, webSearch);
 });
 
 // Stats

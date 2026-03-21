@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('api', {
   // All News
   getAllNews: (filters) => ipcRenderer.invoke('get-all-news', filters),
 
+  // API Testing
+  getApiProviders: () => ipcRenderer.invoke('get-api-providers'),
+  extractArticleContent: (urlsJson) => ipcRenderer.invoke('extract-article-content', urlsJson),
+  getApiTestingItems: () => ipcRenderer.invoke('get-api-testing-items'),
+  callApi: (opts) => ipcRenderer.invoke('call-api', opts),
+
   // Stats
   getStats: () => ipcRenderer.invoke('get-stats'),
 

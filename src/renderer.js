@@ -17,6 +17,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'all-news') { refreshAllNews(); refreshDiscordStatus(); }
     if (btn.dataset.tab === 'keyword-filters') refreshRulesets();
     if (btn.dataset.tab === 'llm-analysis') { populateLLMRulesetFilter(); refreshLLMQueue(); }
+    if (btn.dataset.tab === 'api-testing') refreshApiTestingItems();
   });
 });
 
@@ -1007,6 +1008,208 @@ async function populateLLMRulesetFilter() {
 document.getElementById('llm-refresh-btn').addEventListener('click', refreshLLMQueue);
 document.getElementById('llm-status-filter').addEventListener('change', refreshLLMQueue);
 document.getElementById('llm-ruleset-filter').addEventListener('change', refreshLLMQueue);
+
+// ── API Testing Tab ──
+
+let selectedApiItem = null;
+let apiProviders = [];
+let extractedArticleCache = {};
+
+async function refreshApiTestingItems() {
+  const items = await window.api.getApiTestingItems();
+  if (!apiProviders.length) apiProviders = await window.api.getApiProviders();
+  renderApiTestingList(items);
+}
+
+function renderApiTestingList(items) {
+  const list = document.getElementById('api-testing-items');
+  if (!items || items.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div>No qualified news items yet</div></div>`;
+    return;
+  }
+
+  preserveScroll(list, () => {
+    list.innerHTML = items.map(item => `
+      <div class="llm-queue-item ${selectedApiItem && selectedApiItem.feed_id === item.feed_id ? 'active' : ''}" data-feed-id="${item.feed_id}" style="border-left-color:${item.ruleset_color || 'var(--accent)'}">
+        <div class="llm-queue-item-body">
+          <div class="llm-queue-item-header">
+            <span class="llm-queue-item-ticker">${escapeHtml(item.ticker_symbol || '')}</span>
+            <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.ruleset_name || '')}</span>
+          </div>
+          <div class="llm-queue-item-preview">${escapeHtml((item.text || '').substring(0, 120))}</div>
+          <div class="llm-queue-item-meta">
+            <span>${formatTimestamp(item.filtered_at)}</span>
+            <span>${item.urls_json && item.urls_json !== '[]' ? 'Has links' : 'No links'}</span>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  });
+
+  list.querySelectorAll('.llm-queue-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const feedId = parseInt(el.dataset.feedId);
+      const item = items.find(i => i.feed_id === feedId);
+      if (item) {
+        selectedApiItem = item;
+        list.querySelectorAll('.llm-queue-item').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+        renderApiTestingDetail(item);
+      }
+    });
+  });
+}
+
+async function renderApiTestingDetail(item) {
+  const panel = document.getElementById('api-testing-detail');
+
+  const systemPrompt = item.llm_prompt || 'Analyze the following news item and provide a brief summary of its significance.';
+  const outputFormat = item.llm_output_format || '';
+  const scoringCriteria = (item.llm_scoring_enabled && item.llm_scoring_criteria) ? item.llm_scoring_criteria : '';
+
+  panel.innerHTML = `
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">News Item — ${escapeHtml(item.ticker_symbol || '')} (${escapeHtml(item.ruleset_name || '')})</div>
+      <div class="api-detail-text compact">${escapeHtml(item.text || '')}</div>
+    </div>
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">Extracting Article Content...</div>
+      <div class="api-detail-text compact" style="color:var(--warning);font-style:italic">Fetching linked article content...</div>
+    </div>
+  `;
+
+  let articleContent = '';
+  if (item.urls_json && item.urls_json !== '[]') {
+    const cacheKey = item.news_item_id;
+    if (extractedArticleCache[cacheKey]) {
+      articleContent = extractedArticleCache[cacheKey];
+    } else {
+      articleContent = await window.api.extractArticleContent(item.urls_json) || '(No article content could be extracted)';
+      extractedArticleCache[cacheKey] = articleContent;
+    }
+  } else {
+    articleContent = '(No URLs associated with this news item)';
+  }
+
+  let fullPrompt = systemPrompt;
+  if (outputFormat) fullPrompt += '\n\nDesired output format:\n' + outputFormat;
+  if (scoringCriteria) {
+    fullPrompt += '\n\nScoring instructions:\n' + scoringCriteria;
+    fullPrompt += '\nYou MUST include a "score" field (integer from -1000 to 1000) in your JSON response.';
+  }
+  fullPrompt += '\n\nNews item:\n' + item.text;
+  if (articleContent && !articleContent.startsWith('(')) {
+    fullPrompt += '\n\nFull article content from linked source:\n' + articleContent;
+  }
+
+  const providerOptions = apiProviders.map(p =>
+    p.models.map(m => `<option value="${p.name}|${m}">${p.name} — ${m}</option>`).join('')
+  ).join('');
+
+  panel.innerHTML = `
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">News Item — ${escapeHtml(item.ticker_symbol || '')} (${escapeHtml(item.ruleset_name || '')})</div>
+      <div class="api-detail-text compact">${escapeHtml(item.text || '')}</div>
+    </div>
+
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">Extracted Article Content (${articleContent.length.toLocaleString()} chars)</div>
+      <div class="api-detail-text">${escapeHtml(articleContent)}</div>
+    </div>
+
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">Ruleset Prompts</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div><span style="font-size:11px;color:var(--text-muted)">System Prompt:</span>
+          <div class="api-detail-text compact">${escapeHtml(systemPrompt)}</div></div>
+        ${outputFormat ? `<div><span style="font-size:11px;color:var(--text-muted)">Output Format:</span>
+          <div class="api-detail-text compact">${escapeHtml(outputFormat)}</div></div>` : ''}
+        ${scoringCriteria ? `<div><span style="font-size:11px;color:var(--text-muted)">Scoring Criteria:</span>
+          <div class="api-detail-text compact">${escapeHtml(scoringCriteria)}</div></div>` : ''}
+      </div>
+    </div>
+
+    <div class="api-detail-section">
+      <div class="api-detail-section-title">Full Prompt to Send (${fullPrompt.length.toLocaleString()} chars)</div>
+      <div class="api-detail-text" id="api-full-prompt">${escapeHtml(fullPrompt)}</div>
+    </div>
+
+    <div class="api-send-bar">
+      <select id="api-provider-select" style="flex:1">
+        <option value="">Select provider & model...</option>
+        ${providerOptions}
+      </select>
+      <button id="api-send-btn" class="btn btn-primary">Send to API</button>
+      <span id="api-send-status" style="font-size:12px;color:var(--text-muted)"></span>
+    </div>
+
+    <div class="api-detail-section" id="api-response-section" style="display:none">
+      <div class="api-response-header">
+        <div class="api-detail-section-title">API Response</div>
+        <div class="api-response-meta" id="api-response-meta"></div>
+      </div>
+      <div class="api-detail-text tall" id="api-response-text"></div>
+    </div>
+  `;
+
+  document.getElementById('api-send-btn').addEventListener('click', async () => {
+    const select = document.getElementById('api-provider-select');
+    if (!select.value) { window.api.alertDialog('Please select a provider and model'); return; }
+
+    const [provider, model] = select.value.split('|');
+    const statusEl = document.getElementById('api-send-status');
+    const sendBtn = document.getElementById('api-send-btn');
+    const prompt = document.getElementById('api-full-prompt').textContent;
+
+    statusEl.textContent = `Sending to ${provider} ${model}...`;
+    statusEl.style.color = 'var(--warning)';
+    sendBtn.disabled = true;
+
+    const result = await window.api.callApi({ provider, model, prompt, webSearch: false });
+
+    sendBtn.disabled = false;
+    const responseSection = document.getElementById('api-response-section');
+    responseSection.style.display = '';
+
+    if (result.error) {
+      statusEl.textContent = 'Failed';
+      statusEl.style.color = 'var(--danger)';
+      document.getElementById('api-response-text').textContent = 'Error: ' + result.error;
+      document.getElementById('api-response-meta').innerHTML = '';
+    } else {
+      statusEl.textContent = 'Complete';
+      statusEl.style.color = 'var(--success)';
+
+      const meta = result.meta || {};
+      document.getElementById('api-response-meta').innerHTML = `
+        <span>${meta.latency_ms ? meta.latency_ms + 'ms' : ''}</span>
+        ${meta.processing_ms ? `<span>API: ${meta.processing_ms}ms</span>` : ''}
+        ${meta.request_id ? `<span>ID: ${meta.request_id}</span>` : ''}
+      `;
+
+      let responseHtml;
+      try {
+        const json = JSON.parse(result.text);
+        if (typeof json === 'object' && json !== null) {
+          responseHtml = Object.entries(json).map(([key, value]) => {
+            const label = key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const val = Array.isArray(value) ? value.map(v => escapeHtml(String(v))).join(', ')
+              : typeof value === 'object' ? JSON.stringify(value, null, 2)
+              : String(value);
+            return `<div style="margin-bottom:6px"><strong style="color:var(--text-secondary)">${escapeHtml(label)}:</strong> ${escapeHtml(val)}</div>`;
+          }).join('');
+        } else {
+          responseHtml = escapeHtml(result.text);
+        }
+      } catch {
+        responseHtml = escapeHtml(result.text);
+      }
+      document.getElementById('api-response-text').innerHTML = responseHtml;
+    }
+  });
+}
+
+document.getElementById('api-testing-refresh').addEventListener('click', refreshApiTestingItems);
 
 // ── Real-time Updates ──
 window.api.onNewsFeedUpdate((data) => {
