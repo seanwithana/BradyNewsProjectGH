@@ -1221,29 +1221,38 @@ async function renderApiTestingDetail(item) {
     const promptEl = document.getElementById('api-full-prompt');
     const prompt = promptEl.tagName === 'TEXTAREA' ? promptEl.value : promptEl.textContent;
 
+    const sentAt = new Date();
     statusEl.textContent = `Sending to ${provider} ${model}...`;
     statusEl.style.color = 'var(--warning)';
     sendBtn.disabled = true;
 
     const result = await window.api.callApi({ provider, model, prompt, webSearch: false });
+    const receivedAt = new Date();
+    const roundtripMs = receivedAt - sentAt;
 
     sendBtn.disabled = false;
     const responseSection = document.getElementById('api-response-section');
     responseSection.style.display = '';
 
     if (result.error) {
-      statusEl.textContent = 'Failed';
+      statusEl.textContent = `Failed (${roundtripMs}ms)`;
       statusEl.style.color = 'var(--danger)';
       document.getElementById('api-response-text').textContent = 'Error: ' + result.error;
-      document.getElementById('api-response-meta').innerHTML = '';
+      document.getElementById('api-response-meta').innerHTML = `<span>Roundtrip: ${roundtripMs}ms</span>`;
     } else {
-      statusEl.textContent = 'Complete';
+      statusEl.textContent = `Complete (${roundtripMs}ms)`;
       statusEl.style.color = 'var(--success)';
 
       const meta = result.meta || {};
+      const promptChars = prompt.length;
+      const responseChars = (result.text || '').length;
       document.getElementById('api-response-meta').innerHTML = `
-        <span>${meta.latency_ms ? meta.latency_ms + 'ms' : ''}</span>
-        ${meta.processing_ms ? `<span>API: ${meta.processing_ms}ms</span>` : ''}
+        <span>Sent: ${sentAt.toLocaleTimeString()}</span>
+        <span>Received: ${receivedAt.toLocaleTimeString()}</span>
+        <span>Roundtrip: <strong>${roundtripMs.toLocaleString()}ms</strong></span>
+        ${meta.processing_ms ? `<span>API processing: ${meta.processing_ms}ms</span>` : ''}
+        <span>Prompt: ${promptChars.toLocaleString()} chars</span>
+        <span>Response: ${responseChars.toLocaleString()} chars</span>
         ${meta.request_id ? `<span>ID: ${meta.request_id}</span>` : ''}
       `;
 

@@ -90,6 +90,29 @@ function extractText(html) {
   text = text.replace(/\n{3,}/g, '\n\n');
   text = text.trim();
 
+  // Cut off at forward-looking statements disclaimer
+  const flsPatterns = [
+    /this\s+(?:press\s+release|report|document|announcement)\s+(?:contains?|includes?)\s+forward[- ]looking\s+statements?/i,
+    /(?:contains?|includes?)\s+forward[- ]looking\s+statements?\s+(?:within|as\s+defined|under)/i,
+    /forward[- ]looking\s+statements?\s+(?:are\s+based|involve|subject\s+to)/i,
+    /"safe\s+harbor"\s+statement/i,
+    /Private\s+Securities\s+Litigation\s+Reform\s+Act/i,
+  ];
+  for (const pattern of flsPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const before = text.substring(0, match.index);
+      const lastBreak = Math.max(before.lastIndexOf('\n\n'), before.lastIndexOf('. '));
+      if (lastBreak > 0) {
+        text = text.substring(0, lastBreak + 1).trim();
+      } else {
+        text = before.trim();
+      }
+      text += '\n\n[Forward-looking statements disclaimer removed]';
+      break;
+    }
+  }
+
   // Truncate to avoid sending massive content to LLM
   const MAX_CHARS = 8000;
   if (text.length > MAX_CHARS) {
