@@ -6,6 +6,7 @@ const fs = require('fs');
 const Database = require('./database');
 const KeywordEngine = require('./keyword-engine');
 const LLMProcessor = require('./llm-processor');
+const ApiLLMProcessor = require('./api-llm-processor');
 const { callAPI, getProviders } = require('./api-caller');
 const { fetchAllUrls } = require('./content-fetcher');
 const DiscordScraper = require('./discord-scraper');
@@ -14,6 +15,7 @@ let mainWindow;
 let database;
 let keywordEngine;
 let llmProcessor;
+let apiLlmProcessor;
 let discordScraper;
 
 function emit(event, data) {
@@ -107,6 +109,9 @@ async function initializeBackend() {
   // LLM processor
   llmProcessor = new LLMProcessor(database, emit);
   llmProcessor.start();
+
+  apiLlmProcessor = new ApiLLMProcessor(database, emit);
+  apiLlmProcessor.start();
 }
 
 // ── IPC Handlers ──
@@ -293,6 +298,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (discordScraper) discordScraper.stop();
   if (llmProcessor) llmProcessor.stop();
+  if (apiLlmProcessor) apiLlmProcessor.stop();
   if (database) database.close();
   app.quit();
 });

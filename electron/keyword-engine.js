@@ -37,7 +37,14 @@ class KeywordEngine {
             fullPrompt += '\nYou MUST include a "score" field (integer from -1000 to 1000) in your JSON response.';
           }
           fullPrompt += '\n\nNews item:\n' + newsItem.text;
-          this.db.enqueueLLM(newsItem.id, ruleset.id, fullPrompt);
+
+          const target = ruleset.llm_target || 'local';
+          if (target === 'local' || target === 'both') {
+            this.db.enqueueLLM(newsItem.id, ruleset.id, fullPrompt, 'local');
+          }
+          if (target === 'api' || target === 'both') {
+            this.db.enqueueLLM(newsItem.id, ruleset.id, fullPrompt, 'api', ruleset.llm_api_provider);
+          }
         }
       }
     }
@@ -141,11 +148,8 @@ class KeywordEngine {
       default:    since = new Date(now - 24 * 60 * 60 * 1000);
     }
 
-    // Format as SQLite datetime format (YYYY-MM-DD HH:MM:SS) to match ingested_at
     const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
     let items = this.db.getNewsItemsSince(sinceStr);
-    // Fallback: if time-based query returns nothing, get recent items by ID
-    // This handles timezone/format mismatches on first run
     if (!items || items.length === 0) {
       items = this.db.db.prepare('SELECT * FROM news_items ORDER BY id DESC LIMIT 500').all();
     }

@@ -107,6 +107,10 @@ class BradyDatabase {
       this.db.exec("ALTER TABLE keyword_rulesets ADD COLUMN llm_scoring_criteria TEXT");
       this.db.exec("ALTER TABLE keyword_rulesets ADD COLUMN llm_scoring_threshold INTEGER DEFAULT 0");
     }
+    if (!rsCols.find(c => c.name === 'llm_target')) {
+      this.db.exec("ALTER TABLE keyword_rulesets ADD COLUMN llm_target TEXT DEFAULT 'local'");
+      this.db.exec("ALTER TABLE keyword_rulesets ADD COLUMN llm_api_provider TEXT");
+    }
 
     // LLM queue table for items pending/completed LLM analysis
     this.db.exec(`
@@ -131,6 +135,13 @@ class BradyDatabase {
     const lqCols = this.db.prepare("PRAGMA table_info(llm_queue)").all();
     if (lqCols.length > 0 && !lqCols.find(c => c.name === 'llm_score')) {
       this.db.exec("ALTER TABLE llm_queue ADD COLUMN llm_score INTEGER");
+    }
+    if (lqCols.length > 0 && !lqCols.find(c => c.name === 'target')) {
+      this.db.exec("ALTER TABLE llm_queue ADD COLUMN target TEXT DEFAULT 'local'");
+      this.db.exec("ALTER TABLE llm_queue ADD COLUMN api_provider TEXT");
+      this.db.exec("ALTER TABLE llm_queue ADD COLUMN latency_ms INTEGER");
+      this.db.exec("ALTER TABLE llm_queue ADD COLUMN sent_at TEXT");
+      this.db.exec("ALTER TABLE llm_queue ADD COLUMN received_at TEXT");
     }
 
     // Add score_pending column to news_feed for gating
@@ -202,8 +213,8 @@ class BradyDatabase {
 
   saveRuleset(ruleset) {
     const insertRuleset = this.db.prepare(`
-      INSERT INTO keyword_rulesets (name, color, audio_path, audio_name, enabled, llm_enabled, llm_prompt, llm_output_format, llm_scoring_enabled, llm_scoring_criteria, llm_scoring_threshold)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO keyword_rulesets (name, color, audio_path, audio_name, enabled, llm_enabled, llm_prompt, llm_output_format, llm_scoring_enabled, llm_scoring_criteria, llm_scoring_threshold, llm_target, llm_api_provider)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertRule = this.db.prepare(`
       INSERT INTO keyword_rules (ruleset_id, keyword, logic_operator, rule_group, negate)
@@ -222,7 +233,9 @@ class BradyDatabase {
         ruleset.llm_output_format || null,
         ruleset.llm_scoring_enabled ? 1 : 0,
         ruleset.llm_scoring_criteria || null,
-        ruleset.llm_scoring_threshold || 0
+        ruleset.llm_scoring_threshold || 0,
+        ruleset.llm_target || 'local',
+        ruleset.llm_api_provider || null
       );
       const rulesetId = result.lastInsertRowid;
 
@@ -249,12 +262,14 @@ class BradyDatabase {
         UPDATE keyword_rulesets SET name=?, color=?, audio_path=?, audio_name=?, enabled=?,
         llm_enabled=?, llm_prompt=?, llm_output_format=?,
         llm_scoring_enabled=?, llm_scoring_criteria=?, llm_scoring_threshold=?,
+        llm_target=?, llm_api_provider=?,
         updated_at=datetime('now')
         WHERE id=?
       `).run(ruleset.name, ruleset.color, ruleset.audio_path, ruleset.audio_name, ruleset.enabled ? 1 : 0,
         ruleset.llm_enabled ? 1 : 0, ruleset.llm_prompt || null, ruleset.llm_output_format || null,
         ruleset.llm_scoring_enabled ? 1 : 0, ruleset.llm_scoring_criteria || null,
-        ruleset.llm_scoring_threshold || 0, ruleset.id);
+        ruleset.llm_scoring_threshold || 0,
+        ruleset.llm_target || 'local', ruleset.llm_api_provider || null, ruleset.id);
 
       this.db.prepare('DELETE FROM keyword_rules WHERE ruleset_id=?').run(ruleset.id);
       this.db.prepare('DELETE FROM exclusion_rules WHERE ruleset_id=?').run(ruleset.id);
@@ -308,16 +323,16 @@ class BradyDatabase {
 
   // ── LLM Queue ──
 
-  enqueueLLM(newsItemId, rulesetId, prompt) {
+  enqueueLLM(newsItemId, rulesetId, prompt, target = 'local', apiProvider = null) {
     const existing = this.db.prepare(
-      'SELECT id FROM llm_queue WHERE news_item_id = ? AND ruleset_id = ?'
-    ).get(newsItemId, rulesetId);
+      'SELECT id FROM llm_queue WHERE news_item_id = ? AND ruleset_id = ? AND target = ?'
+    ).get(newsItemId, rulesetId, target);
     if (existing) return existing;
 
     return this.db.prepare(`
-      INSERT INTO llm_queue (news_item_id, ruleset_id, prompt, status)
-      VALUES (?, ?, ?, 'pending')
-    `).run(newsItemId, rulesetId, prompt);
+      INSERT INTO llm_queue (news_item_id, ruleset_id, prompt, status, target, api_provider)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run(newsItemId, rulesetId, prompt, target, apiProvider);
   }
 
   getLLMQueue(filters = {}) {
@@ -345,23 +360,24 @@ class BradyDatabase {
     return { pending, completed, failed, total: pending + completed + failed };
   }
 
-  getPendingLLM(limit = 50) {
+  getPendingLLM(target = 'local', limit = 50) {
     return this.db.prepare(`
       SELECT lq.*, ni.text, ni.ticker_symbol, ni.urls_json, kr.name as ruleset_name
       FROM llm_queue lq
       JOIN news_items ni ON lq.news_item_id = ni.id
       JOIN keyword_rulesets kr ON lq.ruleset_id = kr.id
-      WHERE lq.status = 'pending'
+      WHERE lq.status = 'pending' AND lq.target = ?
       ORDER BY lq.created_at ASC
       LIMIT ?
-    `).all(limit);
+    `).all(target, limit);
   }
 
-  completeLLM(id, response, model, score = null) {
+  completeLLM(id, response, model, score = null, latencyMs = null, sentAt = null, receivedAt = null) {
     this.db.prepare(`
-      UPDATE llm_queue SET status='completed', response=?, model=?, llm_score=?, completed_at=datetime('now')
+      UPDATE llm_queue SET status='completed', response=?, model=?, llm_score=?, completed_at=datetime('now'),
+        latency_ms=?, sent_at=?, received_at=?
       WHERE id=?
-    `).run(response, model, score, id);
+    `).run(response, model, score, latencyMs, sentAt, receivedAt, id);
 
     // If scoring is enabled on the ruleset, update the news_feed entry
     if (score !== null) {

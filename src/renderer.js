@@ -530,7 +530,8 @@ function openEditor(ruleset = null) {
     renderRuleGroups(ruleset.rules || []);
     renderExclusions(ruleset.exclusions || []);
     setLLMUI(!!ruleset.llm_enabled, ruleset.llm_prompt || '', ruleset.llm_output_format || '',
-      !!ruleset.llm_scoring_enabled, ruleset.llm_scoring_criteria || '', ruleset.llm_scoring_threshold || 0);
+      !!ruleset.llm_scoring_enabled, ruleset.llm_scoring_criteria || '', ruleset.llm_scoring_threshold || 0,
+      ruleset.llm_target || 'local', ruleset.llm_api_provider || '');
   } else {
     editingRulesetId = null;
     document.getElementById('editor-title').textContent = 'New Ruleset';
@@ -542,7 +543,7 @@ function openEditor(ruleset = null) {
     updateAudioUI();
     renderRuleGroups([]);
     renderExclusions([]);
-    setLLMUI(false, '', '', false, '', 0);
+    setLLMUI(false, '', '', false, '', 0, 'local', '');
   }
 
   // Update active state
@@ -731,11 +732,13 @@ function collectRulesetFromForm() {
     llm_scoring_enabled: llmScoringEnabled,
     llm_scoring_criteria: llmScoringCriteria || null,
     llm_scoring_threshold: llmScoringThreshold,
+    llm_target: document.getElementById('llm-target').value || 'local',
+    llm_api_provider: document.getElementById('llm-api-provider').value || null,
     rules, exclusions
   };
 }
 
-function setLLMUI(enabled, prompt, outputFormat, scoringEnabled, scoringCriteria, scoringThreshold) {
+async function setLLMUI(enabled, prompt, outputFormat, scoringEnabled, scoringCriteria, scoringThreshold, llmTarget, llmApiProvider) {
   document.getElementById('llm-enabled').checked = enabled;
   document.getElementById('llm-prompt').value = prompt;
   document.getElementById('llm-output-format').value = outputFormat;
@@ -746,6 +749,20 @@ function setLLMUI(enabled, prompt, outputFormat, scoringEnabled, scoringCriteria
   document.getElementById('llm-threshold-value').textContent = scoringThreshold;
   document.getElementById('llm-scoring-options').style.display = scoringEnabled ? '' : 'none';
   updateThresholdColor(scoringThreshold);
+
+  document.getElementById('llm-target').value = llmTarget || 'local';
+  const showApiRow = (llmTarget === 'api' || llmTarget === 'both');
+  document.getElementById('llm-api-provider-row').style.display = showApiRow ? '' : 'none';
+
+  const provSelect = document.getElementById('llm-api-provider');
+  if (provSelect.options.length <= 1) {
+    const providers = await window.api.getApiProviders();
+    provSelect.innerHTML = '<option value="">Select provider & model...</option>' +
+      providers.map(p => p.models.map(m =>
+        `<option value="${p.name}|${m}">${p.name} — ${m}</option>`
+      ).join('')).join('');
+  }
+  if (llmApiProvider) provSelect.value = llmApiProvider;
 }
 
 function updateAudioUI() {
@@ -837,6 +854,12 @@ document.getElementById('ruleset-color').addEventListener('input', (e) => {
 // LLM toggle
 document.getElementById('llm-enabled').addEventListener('change', (e) => {
   document.getElementById('llm-options').style.display = e.target.checked ? '' : 'none';
+});
+
+// LLM Target selector
+document.getElementById('llm-target').addEventListener('change', (e) => {
+  const showApi = (e.target.value === 'api' || e.target.value === 'both');
+  document.getElementById('llm-api-provider-row').style.display = showApi ? '' : 'none';
 });
 
 // LLM Scoring toggle
@@ -951,7 +974,9 @@ function renderLLMQueue(items) {
           <div class="llm-queue-item-header">
             <span class="llm-queue-item-ticker">${escapeHtml(item.ticker_symbol || '')}</span>
             <span class="llm-queue-status-badge ${item.status}">${item.status}</span>
+            <span class="llm-queue-status-badge" style="background:${item.target === 'api' ? 'rgba(96,165,250,0.15)' : 'rgba(251,191,36,0.15)'};color:${item.target === 'api' ? '#60a5fa' : '#fbbf24'}">${item.target || 'local'}</span>
             ${item.llm_score != null ? `<span class="llm-score-badge ${item.llm_score >= 0 ? 'positive' : 'negative'}">Score: ${item.llm_score}</span>` : ''}
+            ${item.latency_ms ? `<span style="font-size:10px;color:var(--success)">${item.latency_ms}ms</span>` : ''}
             <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">${escapeHtml(item.ruleset_name || '')}</span>
           </div>
           <div class="llm-queue-item-preview">${escapeHtml((item.news_text || '').substring(0, 120))}</div>
@@ -1009,10 +1034,16 @@ function renderLLMDetail(item) {
   panel.innerHTML = `
     <div class="llm-detail-header">
       <h3>${escapeHtml(item.ticker_symbol || 'Unknown')} — ${escapeHtml(item.ruleset_name || '')} ${statusBadge} ${scoreBadge}</h3>
-      <div style="font-size:11px;color:var(--text-muted);display:flex;gap:12px;margin-top:4px">
+      <div style="font-size:11px;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:12px;margin-top:4px">
+        <span>Target: <strong>${item.target || 'local'}</strong></span>
+        ${item.model ? `<span>Model: <strong>${escapeHtml(item.model)}</strong></span>` : ''}
         <span>Queued: ${formatTimestamp(item.created_at)}</span>
+        ${item.sent_at ? `<span>Sent: ${formatTimestamp(item.sent_at)}</span>` : ''}
+        ${item.received_at ? `<span>Received: ${formatTimestamp(item.received_at)}</span>` : ''}
+        ${item.latency_ms ? `<span>Latency: <strong style="color:var(--success)">${item.latency_ms.toLocaleString()}ms</strong></span>` : ''}
         ${item.completed_at ? `<span>Completed: ${formatTimestamp(item.completed_at)}</span>` : ''}
-        ${item.model ? `<span>Model: ${escapeHtml(item.model)}</span>` : ''}
+        ${item.prompt ? `<span>Prompt: ${item.prompt.length.toLocaleString()} chars</span>` : ''}
+        ${item.response ? `<span>Response: ${item.response.length.toLocaleString()} chars</span>` : ''}
       </div>
     </div>
 

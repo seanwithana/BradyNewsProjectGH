@@ -42,7 +42,7 @@ class LLMProcessor {
     if (this.processing) return;
     this.processing = true;
     try {
-      const pending = this.db.getPendingLLM(1);
+      const pending = this.db.getPendingLLM('local', 1);
       if (pending.length === 0) {
         this.processing = false;
         return;
@@ -63,13 +63,17 @@ class LLMProcessor {
         }
       }
 
+      const sentAt = new Date().toISOString();
+      const sendStart = Date.now();
       const response = await this.callOllama(fullPrompt);
+      const receivedAt = new Date().toISOString();
+      const latencyMs = Date.now() - sendStart;
+
       if (response.error) {
         log(`ERROR: ${response.error}`);
         this.db.failLLM(item.id, response.error);
       } else {
-        log(`Completed item ${item.id}, response length=${response.text.length}`);
-        // Try to extract score from JSON response
+        log(`Completed item ${item.id}, response length=${response.text.length}, latency=${latencyMs}ms`);
         let score = null;
         try {
           const json = JSON.parse(response.text);
@@ -77,10 +81,8 @@ class LLMProcessor {
             score = Math.max(-1000, Math.min(1000, Math.round(json.score)));
             log(`Extracted score: ${score}`);
           }
-        } catch(e) {
-          // Not JSON or no score field — that's fine
-        }
-        this.db.completeLLM(item.id, response.text, this.model, score);
+        } catch(e) {}
+        this.db.completeLLM(item.id, response.text, this.model, score, latencyMs, sentAt, receivedAt);
 
         // Notify renderer
         this.emit('llm-complete', {

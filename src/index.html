@@ -145,6 +145,18 @@
                 </label>
               </div>
               <div id="llm-options" style="display:none">
+                <div class="form-row" style="margin-bottom:10px">
+                  <label style="min-width:100px">Send To</label>
+                  <select id="llm-target" style="flex:1">
+                    <option value="local">Local LLM (Ollama)</option>
+                    <option value="api">Cloud API</option>
+                    <option value="both">Both (Local + API)</option>
+                  </select>
+                </div>
+                <div class="form-row" id="llm-api-provider-row" style="margin-bottom:10px;display:none">
+                  <label style="min-width:100px">API Provider</label>
+                  <select id="llm-api-provider" style="flex:1"></select>
+                </div>
                 <div class="form-row" style="margin-bottom:8px;align-items:flex-start">
                   <label style="min-width:100px;padding-top:8px">System Prompt</label>
                   <textarea id="llm-prompt" rows="3" placeholder="Instructions for the LLM on how to analyze the news.&#10;&#10;Example: 'You are a financial news analyst. Analyze the following news item and assess its potential market impact.'" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
@@ -153,7 +165,7 @@
                   <label style="min-width:100px;padding-top:8px">Output Format</label>
                   <textarea id="llm-output-format" rows="4" placeholder="Describe the desired output structure.&#10;&#10;Example:&#10;Return a JSON object with: sentiment (bullish/bearish/neutral), impact_score (1-10), summary (2-3 sentences), key_entities (array of company/person names), and action_items (array of notable takeaways)." style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
                 </div>
-                <p class="hint">The news text will be sent along with your system prompt and output format instructions to the cloud LLM API. Configure the API endpoint in Settings (coming soon).</p>
+                <p class="hint">The news text and linked article content will be sent to the selected LLM target(s) automatically when a news item passes keyword filtering.</p>
 
                 <div class="llm-scoring-section" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
                   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
