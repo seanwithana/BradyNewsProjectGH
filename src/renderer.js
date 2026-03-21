@@ -369,10 +369,53 @@ async function refreshAllNews() {
           <div class="news-card-timestamps">
             <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
             <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
+            <button class="btn btn-small btn-primary send-to-api-btn" data-item-id="${item.id}" style="margin-left:auto">Send to API Testing</button>
           </div>
         </div>`;
     }).join('');
   });
+
+  // Wire "Send to API Testing" buttons
+  list.querySelectorAll('.send-to-api-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const itemId = parseInt(btn.dataset.itemId);
+      const item = items.find(i => i.id === itemId);
+      if (item) sendNewsItemToApiTesting(item);
+    });
+  });
+}
+
+function sendNewsItemToApiTesting(newsItem) {
+  // Build a pseudo feed-item from a raw news item so API Testing can handle it
+  const pseudoItem = {
+    feed_id: 'manual_' + newsItem.id,
+    news_item_id: newsItem.id,
+    ruleset_id: null,
+    matched_keywords: '[]',
+    filtered_at: new Date().toISOString(),
+    ticker_symbol: newsItem.ticker_symbol,
+    text: newsItem.text,
+    urls_json: newsItem.urls_json,
+    original_timestamp: newsItem.original_timestamp,
+    ruleset_name: 'Manual Test',
+    ruleset_color: '#6c63ff',
+    llm_enabled: 0,
+    llm_prompt: '',
+    llm_output_format: '',
+    llm_scoring_enabled: 0,
+    llm_scoring_criteria: ''
+  };
+
+  // Switch to API Testing tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="api-testing"]').classList.add('active');
+  document.getElementById('tab-api-testing').classList.add('active');
+
+  selectedApiItem = pseudoItem;
+  refreshApiTestingItems();
+  renderApiTestingDetail(pseudoItem);
 }
 
 async function refreshDiscordStatus() {
@@ -1063,7 +1106,8 @@ function renderApiTestingList(items) {
 async function renderApiTestingDetail(item) {
   const panel = document.getElementById('api-testing-detail');
 
-  const systemPrompt = item.llm_prompt || 'Analyze the following news item and provide a brief summary of its significance.';
+  const isManual = !item.ruleset_id;
+  const systemPrompt = item.llm_prompt || '';
   const outputFormat = item.llm_output_format || '';
   const scoringCriteria = (item.llm_scoring_enabled && item.llm_scoring_criteria) ? item.llm_scoring_criteria : '';
 
@@ -1078,9 +1122,11 @@ async function renderApiTestingDetail(item) {
     </div>
   `;
 
+  if (!apiProviders.length) apiProviders = await window.api.getApiProviders();
+
   let articleContent = '';
   if (item.urls_json && item.urls_json !== '[]') {
-    const cacheKey = item.news_item_id;
+    const cacheKey = item.news_item_id || item.id;
     if (extractedArticleCache[cacheKey]) {
       articleContent = extractedArticleCache[cacheKey];
     } else {
@@ -1091,20 +1137,48 @@ async function renderApiTestingDetail(item) {
     articleContent = '(No URLs associated with this news item)';
   }
 
-  let fullPrompt = systemPrompt;
-  if (outputFormat) fullPrompt += '\n\nDesired output format:\n' + outputFormat;
-  if (scoringCriteria) {
-    fullPrompt += '\n\nScoring instructions:\n' + scoringCriteria;
-    fullPrompt += '\nYou MUST include a "score" field (integer from -1000 to 1000) in your JSON response.';
+  const hasArticle = articleContent && !articleContent.startsWith('(');
+
+  // For manual sends, build a default prompt; for ruleset items, assemble from ruleset config
+  let defaultPrompt = '';
+  if (!isManual) {
+    defaultPrompt = systemPrompt || 'Analyze the following news item and provide a brief summary of its significance.';
+    if (outputFormat) defaultPrompt += '\n\nDesired output format:\n' + outputFormat;
+    if (scoringCriteria) {
+      defaultPrompt += '\n\nScoring instructions:\n' + scoringCriteria;
+      defaultPrompt += '\nYou MUST include a "score" field (integer from -1000 to 1000) in your JSON response.';
+    }
   }
-  fullPrompt += '\n\nNews item:\n' + item.text;
-  if (articleContent && !articleContent.startsWith('(')) {
-    fullPrompt += '\n\nFull article content from linked source:\n' + articleContent;
+  defaultPrompt += (defaultPrompt ? '\n\n' : '') + 'News item:\n' + item.text;
+  if (hasArticle) {
+    defaultPrompt += '\n\nFull article content from linked source:\n' + articleContent;
   }
 
   const providerOptions = apiProviders.map(p =>
     p.models.map(m => `<option value="${p.name}|${m}">${p.name} — ${m}</option>`).join('')
   ).join('');
+
+  // Prompt section: editable textarea for manual, read-only display for ruleset items
+  const promptSection = isManual
+    ? `<div class="api-detail-section">
+        <div class="api-detail-section-title">Prompt (editable)</div>
+        <textarea id="api-full-prompt" rows="12" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:10px;font-size:12px;line-height:1.6;resize:vertical;font-family:inherit">${escapeHtml(defaultPrompt)}</textarea>
+      </div>`
+    : `<div class="api-detail-section">
+        <div class="api-detail-section-title">Ruleset Prompts</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div><span style="font-size:11px;color:var(--text-muted)">System Prompt:</span>
+            <div class="api-detail-text compact">${escapeHtml(systemPrompt || '(default)')}</div></div>
+          ${outputFormat ? `<div><span style="font-size:11px;color:var(--text-muted)">Output Format:</span>
+            <div class="api-detail-text compact">${escapeHtml(outputFormat)}</div></div>` : ''}
+          ${scoringCriteria ? `<div><span style="font-size:11px;color:var(--text-muted)">Scoring Criteria:</span>
+            <div class="api-detail-text compact">${escapeHtml(scoringCriteria)}</div></div>` : ''}
+        </div>
+      </div>
+      <div class="api-detail-section">
+        <div class="api-detail-section-title">Full Prompt to Send (${defaultPrompt.length.toLocaleString()} chars)</div>
+        <div class="api-detail-text" id="api-full-prompt">${escapeHtml(defaultPrompt)}</div>
+      </div>`;
 
   panel.innerHTML = `
     <div class="api-detail-section">
@@ -1117,22 +1191,7 @@ async function renderApiTestingDetail(item) {
       <div class="api-detail-text">${escapeHtml(articleContent)}</div>
     </div>
 
-    <div class="api-detail-section">
-      <div class="api-detail-section-title">Ruleset Prompts</div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <div><span style="font-size:11px;color:var(--text-muted)">System Prompt:</span>
-          <div class="api-detail-text compact">${escapeHtml(systemPrompt)}</div></div>
-        ${outputFormat ? `<div><span style="font-size:11px;color:var(--text-muted)">Output Format:</span>
-          <div class="api-detail-text compact">${escapeHtml(outputFormat)}</div></div>` : ''}
-        ${scoringCriteria ? `<div><span style="font-size:11px;color:var(--text-muted)">Scoring Criteria:</span>
-          <div class="api-detail-text compact">${escapeHtml(scoringCriteria)}</div></div>` : ''}
-      </div>
-    </div>
-
-    <div class="api-detail-section">
-      <div class="api-detail-section-title">Full Prompt to Send (${fullPrompt.length.toLocaleString()} chars)</div>
-      <div class="api-detail-text" id="api-full-prompt">${escapeHtml(fullPrompt)}</div>
-    </div>
+    ${promptSection}
 
     <div class="api-send-bar">
       <select id="api-provider-select" style="flex:1">
@@ -1159,7 +1218,8 @@ async function renderApiTestingDetail(item) {
     const [provider, model] = select.value.split('|');
     const statusEl = document.getElementById('api-send-status');
     const sendBtn = document.getElementById('api-send-btn');
-    const prompt = document.getElementById('api-full-prompt').textContent;
+    const promptEl = document.getElementById('api-full-prompt');
+    const prompt = promptEl.tagName === 'TEXTAREA' ? promptEl.value : promptEl.textContent;
 
     statusEl.textContent = `Sending to ${provider} ${model}...`;
     statusEl.style.color = 'var(--warning)';
