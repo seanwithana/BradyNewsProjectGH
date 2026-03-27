@@ -7,8 +7,12 @@ class KeywordEngine {
    * Process a single news item against all enabled rulesets.
    * Returns array of { rulesetId, matchedKeywords, color } for matches.
    */
-  processItem(newsItem) {
-    const rulesets = this.db.getRulesets().filter(rs => rs.enabled);
+  processItem(newsItem, sourceType = 'discord') {
+    const rulesets = this.db.getRulesets().filter(rs => {
+      if (!rs.enabled) return false;
+      const sources = (rs.sources || 'discord').split(',').map(s => s.trim());
+      return sources.includes(sourceType);
+    });
     const matches = [];
 
     for (const ruleset of rulesets) {

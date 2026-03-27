@@ -14,6 +14,7 @@
       <button class="tab-btn" data-tab="keyword-filters">Keyword Filters</button>
       <button class="tab-btn" data-tab="llm-analysis">LLM Analysis</button>
       <button class="tab-btn" data-tab="api-testing">API Testing</button>
+      <button class="tab-btn" data-tab="truth-feed">Truth Feed</button>
       <div class="stats-bar">
         <span id="stat-total">0 items</span>
         <span id="stat-feed">0 in feed</span>
@@ -115,6 +116,21 @@
                 <button id="clear-audio-btn" class="btn btn-small btn-danger" style="display:none;">×</button>
                 <button id="test-audio-btn" class="btn btn-small btn-secondary" style="display:none;">Test</button>
               </div>
+            </div>
+
+            <div class="form-section">
+              <div class="section-header">
+                <h3>Sources</h3>
+              </div>
+              <div class="sources-checkboxes" style="display:flex;gap:16px;padding:4px 0">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-primary)">
+                  <input type="checkbox" id="source-discord" checked /> Discord News Bot
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-primary)">
+                  <input type="checkbox" id="source-truth" /> Trump Truth Social
+                </label>
+              </div>
+              <p class="hint">Select which sources this keyword filter should run on.</p>
             </div>
 
             <div class="form-section">
@@ -261,6 +277,10 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div id="tab-truth-feed" class="tab-content">
+      <div id="truth-feed-list" class="feed-list"></div>
     </div>
   </div>
 

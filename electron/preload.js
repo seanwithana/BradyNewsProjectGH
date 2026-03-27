@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('api', {
   // Finviz enrichment
   enqueueFinviz: (items) => ipcRenderer.invoke('enqueue-finviz', items),
 
+  // Truth Social
+  getTruthPosts: () => ipcRenderer.invoke('get-truth-posts'),
+
   // Events
   onNewsFeedUpdate: (callback) => {
     ipcRenderer.on('news-feed-update', (_, data) => callback(data));
@@ -63,5 +66,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   onFinvizUpdate: (callback) => {
     ipcRenderer.on('finviz-update', (_, data) => callback(data));
+  },
+  onTruthUpdate: (callback) => {
+    ipcRenderer.on('truth-update', (_, data) => callback(data));
   }
 });

@@ -151,6 +151,12 @@ class BradyDatabase {
       this.db.exec("ALTER TABLE news_feed ADD COLUMN llm_score INTEGER");
     }
 
+    // Add sources column to keyword_rulesets (default: only discord for existing rulesets)
+    const rsCols2 = this.db.prepare("PRAGMA table_info(keyword_rulesets)").all();
+    if (!rsCols2.find(c => c.name === 'sources')) {
+      this.db.exec("ALTER TABLE keyword_rulesets ADD COLUMN sources TEXT DEFAULT 'discord'");
+    }
+
     // Add float columns to news_items
     const niCols = this.db.prepare("PRAGMA table_info(news_items)").all();
     if (!niCols.find(c => c.name === 'float_raw')) {
@@ -236,8 +242,8 @@ class BradyDatabase {
 
   saveRuleset(ruleset) {
     const insertRuleset = this.db.prepare(`
-      INSERT INTO keyword_rulesets (name, color, audio_path, audio_name, enabled, llm_enabled, llm_prompt, llm_output_format, llm_scoring_enabled, llm_scoring_criteria, llm_scoring_threshold, llm_target, llm_api_provider)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO keyword_rulesets (name, color, audio_path, audio_name, enabled, llm_enabled, llm_prompt, llm_output_format, llm_scoring_enabled, llm_scoring_criteria, llm_scoring_threshold, llm_target, llm_api_provider, sources)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertRule = this.db.prepare(`
       INSERT INTO keyword_rules (ruleset_id, keyword, logic_operator, rule_group, negate)
@@ -258,7 +264,8 @@ class BradyDatabase {
         ruleset.llm_scoring_criteria || null,
         ruleset.llm_scoring_threshold || 0,
         ruleset.llm_target || 'local',
-        ruleset.llm_api_provider || null
+        ruleset.llm_api_provider || null,
+        ruleset.sources || 'discord'
       );
       const rulesetId = result.lastInsertRowid;
 
@@ -285,14 +292,15 @@ class BradyDatabase {
         UPDATE keyword_rulesets SET name=?, color=?, audio_path=?, audio_name=?, enabled=?,
         llm_enabled=?, llm_prompt=?, llm_output_format=?,
         llm_scoring_enabled=?, llm_scoring_criteria=?, llm_scoring_threshold=?,
-        llm_target=?, llm_api_provider=?,
+        llm_target=?, llm_api_provider=?, sources=?,
         updated_at=datetime('now')
         WHERE id=?
       `).run(ruleset.name, ruleset.color, ruleset.audio_path, ruleset.audio_name, ruleset.enabled ? 1 : 0,
         ruleset.llm_enabled ? 1 : 0, ruleset.llm_prompt || null, ruleset.llm_output_format || null,
         ruleset.llm_scoring_enabled ? 1 : 0, ruleset.llm_scoring_criteria || null,
         ruleset.llm_scoring_threshold || 0,
-        ruleset.llm_target || 'local', ruleset.llm_api_provider || null, ruleset.id);
+        ruleset.llm_target || 'local', ruleset.llm_api_provider || null,
+        ruleset.sources || 'discord', ruleset.id);
 
       this.db.prepare('DELETE FROM keyword_rules WHERE ruleset_id=?').run(ruleset.id);
       this.db.prepare('DELETE FROM exclusion_rules WHERE ruleset_id=?').run(ruleset.id);
@@ -470,7 +478,7 @@ class BradyDatabase {
              kr.name as ruleset_name, kr.color as ruleset_color, kr.audio_path,
              kr.llm_scoring_enabled, kr.llm_scoring_threshold,
              lq.response as llm_response, lq.status as llm_status, lq.model as llm_model,
-             lq.llm_score as llm_score
+             lq.llm_score as llm_score, lq.completed_at as llm_completed_at
       FROM news_feed nf
       JOIN news_items ni ON nf.news_item_id = ni.id
       JOIN keyword_rulesets kr ON nf.ruleset_id = kr.id

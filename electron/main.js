@@ -11,6 +11,7 @@ const { callAPI, getProviders } = require('./api-caller');
 const { fetchAllUrls } = require('./content-fetcher');
 const DiscordScraper = require('./discord-scraper');
 const finvizScraper = require('./finviz-scraper');
+const TruthScraper = require('./truth-scraper');
 
 let mainWindow;
 let database;
@@ -18,6 +19,7 @@ let keywordEngine;
 let llmProcessor;
 let apiLlmProcessor;
 let discordScraper;
+let truthScraper;
 
 function emit(event, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -59,52 +61,55 @@ async function initializeBackend() {
       configToken = JSON.parse(fs.readFileSync(configPath, 'utf-8')).discord_bot_token;
     }
   } catch(e) {}
+  // Shared function to process a news item through keyword filters
+  function processNewItem(newsItem, sourceType = 'discord') {
+    emit('new-item-ingested', { ticker: newsItem.ticker_symbol });
+
+    const matches = keywordEngine.processItem(newsItem, sourceType);
+    const feedEntries = [];
+    for (const match of matches) {
+      const feedResult = database.insertFeedEntry({
+        news_item_id: newsItem.id,
+        ruleset_id: match.rulesetId,
+        matched_keywords: JSON.stringify(match.matchedKeywords),
+        received_at: newsItem.original_timestamp,
+        color: match.color,
+        score_gated: match.scoringEnabled
+      });
+      if (feedResult && feedResult.changes > 0) {
+        feedEntries.push({ newsItem, match });
+      }
+    }
+
+    if (feedEntries.length > 0) {
+      emit('news-feed-update', {
+        count: feedEntries.length,
+        entries: feedEntries.slice(0, 20).map(e => ({
+          ticker: e.newsItem.ticker_symbol,
+          rulesetName: e.match.rulesetName,
+          matchedKeywords: e.match.matchedKeywords,
+          color: e.match.color,
+          audioPath: e.match.audioPath,
+          text: e.newsItem.text.substring(0, 200)
+        }))
+      });
+
+      // Async finviz lookup for items missing float or market cap
+      const needsCap = !newsItem.market_cap_raw;
+      const needsFloat = !newsItem.float_raw;
+      if (newsItem.ticker_symbol && (needsCap || needsFloat)) {
+        finvizScraper.enqueue(newsItem.ticker_symbol, newsItem.id, needsCap, needsFloat, (itemId, ticker, updates) => {
+          database.updateNewsItemFinviz(itemId, updates);
+          emit('finviz-update', { newsItemId: itemId, ticker, ...updates });
+        });
+      }
+    }
+  }
+
   const token = process.env.DISCORD_BOT_TOKEN || configToken;
   if (token) {
     discordScraper = new DiscordScraper(database, token, (newsItem) => {
-      // Always notify renderer of new item (for All News tab)
-      emit('new-item-ingested', { ticker: newsItem.ticker_symbol });
-
-      // Process each new item through keyword engine
-      const matches = keywordEngine.processItem(newsItem);
-      const feedEntries = [];
-      for (const match of matches) {
-        const feedResult = database.insertFeedEntry({
-          news_item_id: newsItem.id,
-          ruleset_id: match.rulesetId,
-          matched_keywords: JSON.stringify(match.matchedKeywords),
-          received_at: newsItem.original_timestamp,
-          color: match.color,
-          score_gated: match.scoringEnabled
-        });
-        if (feedResult && feedResult.changes > 0) {
-          feedEntries.push({ newsItem, match });
-        }
-      }
-
-      if (feedEntries.length > 0) {
-        emit('news-feed-update', {
-          count: feedEntries.length,
-          entries: feedEntries.slice(0, 20).map(e => ({
-            ticker: e.newsItem.ticker_symbol,
-            rulesetName: e.match.rulesetName,
-            matchedKeywords: e.match.matchedKeywords,
-            color: e.match.color,
-            audioPath: e.match.audioPath,
-            text: e.newsItem.text.substring(0, 200)
-          }))
-        });
-
-        // Async finviz lookup for items missing float or market cap
-        const needsCap = !newsItem.market_cap_raw;
-        const needsFloat = !newsItem.float_raw;
-        if (newsItem.ticker_symbol && (needsCap || needsFloat)) {
-          finvizScraper.enqueue(newsItem.ticker_symbol, newsItem.id, needsCap, needsFloat, (itemId, ticker, updates) => {
-            database.updateNewsItemFinviz(itemId, updates);
-            emit('finviz-update', { newsItemId: itemId, ticker, ...updates });
-          });
-        }
-      }
+      processNewItem(newsItem, 'discord');
     });
     discordScraper.start();
 
@@ -123,6 +128,38 @@ async function initializeBackend() {
 
   apiLlmProcessor = new ApiLLMProcessor(database, emit);
   apiLlmProcessor.start();
+
+  // Truth Social scraper
+  truthScraper = new TruthScraper((newPosts, allPosts) => {
+    emit('truth-update', { newPosts, allPosts });
+
+    // Insert each new post as a news item and run through keyword filters
+    for (const post of newPosts) {
+      const sourceKey = 'truth_' + post.id;
+      const text = post.isRetruth && post.reblogText ? post.reblogText : post.text;
+      const item = {
+        source_type: 'truth',
+        source_key: sourceKey,
+        ticker_symbol: null,
+        text: text,
+        country_iso2: null,
+        market_cap_raw: null,
+        market_cap_value: null,
+        urls_json: '[]',
+        source_channels_json: '[]',
+        source_message_ids_json: JSON.stringify([post.id]),
+        original_timestamp: post.createdAt.replace('T', ' ').replace('Z', '').slice(0, 19)
+      };
+      const result = database.insertNewsItem(item);
+      if (result.changes > 0) {
+        const inserted = database.getNewsItemBySourceKey(sourceKey);
+        if (inserted) {
+          processNewItem(inserted, 'truth');
+        }
+      }
+    }
+  });
+  truthScraper.start();
 }
 
 // ── IPC Handlers ──
@@ -144,6 +181,11 @@ ipcMain.handle('enqueue-finviz', (_, items) => {
 
 ipcMain.handle('search-news', (_, query) => {
   return database.searchNews(query);
+});
+
+// Truth Social
+ipcMain.handle('get-truth-posts', () => {
+  return truthScraper ? truthScraper.getPosts() : [];
 });
 
 // Rulesets

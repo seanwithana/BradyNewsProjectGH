@@ -18,6 +18,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'keyword-filters') refreshRulesets();
     if (btn.dataset.tab === 'llm-analysis') { populateLLMRulesetFilter(); refreshLLMQueue(); }
     if (btn.dataset.tab === 'api-testing') refreshApiTestingItems();
+    if (btn.dataset.tab === 'truth-feed') refreshTruthFeed();
   });
 });
 
@@ -147,6 +148,10 @@ function renderFeedItems(items) {
     text = text.replace(/\s*~\s*\|?\s*/g, ' ');
     // Remove empty bold blocks (** **) and trim
     text = text.replace(/\*\*\s*\*\*/g, '').trim();
+    // Remove backtick-wrapped time at the beginning (e.g. `08:30` or `14:15`)
+    text = text.replace(/^\s*`\d{1,2}:\d{2}`\s*/, '');
+    // Remove arrow indicators (↑ ↓) at the beginning
+    text = text.replace(/^\s*[↑↓]\s*/, '');
 
     // Highlight matched keywords
     for (const kw of matchedKeywords) {
@@ -161,11 +166,13 @@ function renderFeedItems(items) {
     const urls = safeParseJSON(item.urls_json, []);
     const borderColor = item.color || item.ruleset_color || '#6c63ff';
 
+    const receivedTime = formatTimeHMS(item.received_at || item.original_timestamp);
+
     return `
       <div class="news-card" data-news-item-id="${item.news_item_id}" style="border-left-color: ${borderColor}">
         <div class="news-card-header">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="news-card-time">${receivedTime}</span>
             <span class="market-cap-badge finviz-cap" style="color:${valueTierColor(extractedMC)}">${extractedMC ? `Cap: ${escapeHtml(extractedMC)}` : ''}</span>
             <span class="market-cap-badge finviz-float" style="color:${valueTierColor(extractedFloat)}">${extractedFloat ? `Float: ${escapeHtml(extractedFloat)}` : ''}</span>
             ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
@@ -185,10 +192,14 @@ function renderFeedItems(items) {
             ${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}
           </div>` : ''}
         ${renderLLMResponse(item)}
-        <div class="news-card-timestamps">
-          <span>Received: ${formatTimestamp(item.received_at || item.original_timestamp)}</span>
-          <span>Filtered: ${formatTimestamp(item.filtered_at)}</span>
-          <span>Displayed: ${formatTimestamp(item.displayed_at)}</span>
+        <div class="news-card-footer">
+          <button class="timestamps-toggle" onclick="this.parentElement.querySelector('.news-card-timestamps').classList.toggle('show');this.classList.toggle('open')">▶ times</button>
+          <div class="news-card-timestamps">
+            <span>Received: ${formatTimestamp(item.received_at || item.original_timestamp)}</span>
+            <span>Filtered: ${formatTimestamp(item.filtered_at)}</span>
+            <span>Displayed: ${formatTimestamp(item.displayed_at)}</span>
+            ${item.llm_completed_at ? `<span>AI Done: ${formatTimestamp(item.llm_completed_at)}</span>` : ''}
+          </div>
         </div>
       </div>`;
   }).join(''); });
@@ -412,6 +423,55 @@ function renderScoreBar(value, key) {
     <span class="llm-score-bar"><span class="llm-score-fill" style="width:${pct}%;background:${color}"></span></span>`;
 }
 
+// ── Truth Feed Tab ──
+
+async function refreshTruthFeed() {
+  const posts = await window.api.getTruthPosts();
+  renderTruthPosts(posts);
+}
+
+function renderTruthPosts(posts) {
+  const list = document.getElementById('truth-feed-list');
+  if (!posts || posts.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div>No Truth Social posts yet</div><div style="font-size:12px">Polling @realDonaldTrump every 15 seconds...</div></div>`;
+    return;
+  }
+
+  list.innerHTML = posts.slice(0, 10).map(post => {
+    const time = formatTimeHMS(post.createdAt);
+    const fullTime = formatTimestamp(post.createdAt);
+    let text = escapeHtml(post.isRetruth && post.reblogText ? post.reblogText : post.text);
+    text = text.replace(/\n/g, '<br>');
+    const rtTag = post.isRetruth ? `<span class="truth-rt-badge">RT${post.reblogAuthor ? ' @' + escapeHtml(post.reblogAuthor) : ''}</span>` : '';
+
+    return `
+      <div class="news-card truth-card" style="border-left-color: #6be1ff">
+        <div class="news-card-header">
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="news-card-time">${time}</span>
+            <span style="font-weight:700;font-size:12px;color:#6be1ff">@realDonaldTrump</span>
+            ${rtTag}
+          </div>
+          <a href="${escapeHtml(post.url)}" target="_blank" style="font-size:9px;color:var(--text-muted);text-decoration:none">open</a>
+        </div>
+        <div class="news-card-body" style="color:#ffffff">${text}</div>
+        <div class="news-card-footer" style="position:relative">
+          <button class="timestamps-toggle" onclick="this.parentElement.querySelector('.news-card-timestamps').classList.toggle('show');this.classList.toggle('open')">▶ times</button>
+          <div class="news-card-timestamps">
+            <span>Posted: ${fullTime}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Listen for live Truth Social updates
+window.api.onTruthUpdate((data) => {
+  if (document.querySelector('.tab-btn[data-tab="truth-feed"]').classList.contains('active')) {
+    renderTruthPosts(data.allPosts);
+  }
+});
+
 // ── All News Tab ──
 
 async function refreshAllNews() {
@@ -483,15 +543,21 @@ async function refreshAllNews() {
       text = text.replace(/\s*~\s*\|?\s*/g, ' ');
       // Remove empty bold blocks (** **) and trim
       text = text.replace(/\*\*\s*\*\*/g, '').trim();
+      // Remove backtick-wrapped time at the beginning (e.g. `08:30`)
+      text = text.replace(/^\s*`\d{1,2}:\d{2}`\s*/, '');
+      // Remove arrow indicators (↑ ↓) at the beginning
+      text = text.replace(/^\s*[↑↓]\s*/, '');
 
       text = formatDiscordText(text);
       const urls = safeParseJSON(item.urls_json, []);
 
+      const receivedTime = formatTimeHMS(item.original_timestamp);
+
       return `
         <div class="news-card" style="border-left-color: var(--accent)">
           <div class="news-card-header">
-            <div style="display:flex;gap:8px;align-items:center">
-              <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span class="news-card-time">${receivedTime}</span>
               ${extractedMC ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedMC)}">Cap: ${escapeHtml(extractedMC)}</span>` : ''}
               ${extractedFloat ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedFloat)}">Float: ${escapeHtml(extractedFloat)}</span>` : ''}
               ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
@@ -501,10 +567,13 @@ async function refreshAllNews() {
           </div>
           <div class="news-card-body" style="color:#ffffff">${text}</div>
           ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
-          <div class="news-card-timestamps">
-            <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
-            <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
-            <button class="btn btn-small btn-primary send-to-api-btn" data-item-id="${item.id}" style="margin-left:auto">Send to API Testing</button>
+          <div class="news-card-footer">
+            <button class="timestamps-toggle" onclick="this.parentElement.querySelector('.news-card-timestamps').classList.toggle('show');this.classList.toggle('open')">▶ times</button>
+            <button class="btn btn-small btn-primary send-to-api-btn" data-item-id="${item.id}">Send to API Testing</button>
+            <div class="news-card-timestamps">
+              <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
+              <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
+            </div>
           </div>
         </div>`;
     }).join('');
@@ -662,6 +731,10 @@ function openEditor(ruleset = null) {
     audioFileName = ruleset.audio_name;
     updateAudioUI();
 
+    const sources = (ruleset.sources || 'discord').split(',').map(s => s.trim());
+    document.getElementById('source-discord').checked = sources.includes('discord');
+    document.getElementById('source-truth').checked = sources.includes('truth');
+
     renderRuleGroups(ruleset.rules || []);
     renderExclusions(ruleset.exclusions || []);
     setLLMUI(!!ruleset.llm_enabled, ruleset.llm_prompt || '', ruleset.llm_output_format || '',
@@ -673,6 +746,8 @@ function openEditor(ruleset = null) {
     document.getElementById('ruleset-name').value = '';
     document.getElementById('ruleset-color').value = '#ff6b6b';
     document.getElementById('color-preview').style.background = '#ff6b6b';
+    document.getElementById('source-discord').checked = true;
+    document.getElementById('source-truth').checked = false;
     audioFilePath = null;
     audioFileName = null;
     updateAudioUI();
@@ -856,11 +931,17 @@ function collectRulesetFromForm() {
   const llmScoringCriteria = document.getElementById('llm-scoring-criteria').value.trim();
   const llmScoringThreshold = parseInt(document.getElementById('llm-scoring-threshold').value) || 0;
 
+  const sourceParts = [];
+  if (document.getElementById('source-discord').checked) sourceParts.push('discord');
+  if (document.getElementById('source-truth').checked) sourceParts.push('truth');
+  const sources = sourceParts.join(',') || 'discord';
+
   return {
     id: editingRulesetId,
     name, color, enabled,
     audio_path: audioFilePath,
     audio_name: audioFileName,
+    sources,
     llm_enabled: llmEnabled,
     llm_prompt: llmPrompt || null,
     llm_output_format: llmOutputFormat || null,
@@ -1541,6 +1622,14 @@ function formatTimestamp(ts) {
     const d = new Date(ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
     return d.toLocaleString();
   } catch { return ts; }
+}
+
+function formatTimeHMS(ts) {
+  if (!ts) return '';
+  try {
+    const d = new Date(ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  } catch { return ''; }
 }
 
 async function playAudio(filePath) {
