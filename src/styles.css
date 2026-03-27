@@ -104,18 +104,18 @@ body {
 .feed-list {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
 }
 
 /* News Card */
 .news-card {
   background: var(--bg-card);
-  border-radius: 10px;
-  padding: 16px;
-  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
   transition: transform 0.15s, box-shadow 0.15s;
   animation: slideIn 0.3s ease-out;
 }
@@ -133,17 +133,17 @@ body {
 .news-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 8px;
+  align-items: center;
+  margin-bottom: 2px;
 }
 
 .news-card-ticker {
   font-weight: 700;
-  font-size: 16px;
+  font-size: 13px;
   color: var(--accent);
   background: rgba(108, 99, 255, 0.15);
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 .news-card-meta {
@@ -154,18 +154,28 @@ body {
 }
 
 .news-card-ruleset {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
   font-weight: 500;
 }
 
+.news-card-source {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
 .news-card-body {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.3;
   color: var(--text-primary);
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
+  margin-top: 0;
+  padding: 0;
 }
 
 .news-card-body .keyword-highlight {
@@ -178,23 +188,43 @@ body {
 
 /* LLM Response */
 .llm-response {
-  margin-top: 10px;
-  padding: 10px 12px;
+  margin-top: 2px;
+  padding: 3px 8px;
   background: rgba(108, 99, 255, 0.06);
   border: 1px solid rgba(108, 99, 255, 0.15);
-  border-radius: 8px;
+  border-radius: 4px;
+}
+
+.llm-response details summary {
+  cursor: pointer;
+  list-style: none;
+}
+.llm-response details summary::marker,
+.llm-response details summary::-webkit-details-marker {
+  display: none;
+}
+.llm-response details summary::before {
+  content: '▼';
+  font-size: 8px;
+  margin-right: 4px;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.llm-response details:not([open]) summary::before {
+  transform: rotate(-90deg);
 }
 
 .llm-header {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--accent);
-  margin-bottom: 8px;
+  margin-bottom: 2px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  user-select: none;
 }
 
 .llm-model {
@@ -209,10 +239,10 @@ body {
 }
 
 .llm-score-badge {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 1px 8px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
   margin-left: auto;
 }
 
@@ -227,14 +257,14 @@ body {
 }
 
 .llm-pending {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--text-muted);
   font-style: italic;
 }
 
 .llm-text {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.25;
   color: var(--text-primary);
   white-space: pre-wrap;
 }
@@ -242,28 +272,28 @@ body {
 .llm-field {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
+  gap: 6px;
+  padding: 1px 0;
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 
 .llm-field:last-child { border-bottom: none; }
 
 .llm-field-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-secondary);
-  min-width: 100px;
+  min-width: 80px;
   flex-shrink: 0;
 }
 
 .llm-field-value {
-  font-size: 13px;
+  font-size: 11px;
   color: var(--text-primary);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .llm-muted { color: var(--text-muted); font-style: italic; }
@@ -348,12 +378,12 @@ body {
 
 .news-card-timestamps {
   display: flex;
-  gap: 16px;
-  margin-top: 10px;
-  font-size: 11px;
+  gap: 12px;
+  margin-top: 3px;
+  font-size: 10px;
   color: var(--text-muted);
   border-top: 1px solid var(--border);
-  padding-top: 8px;
+  padding-top: 3px;
 }
 
 .news-card-timestamps span {
@@ -363,7 +393,7 @@ body {
 }
 
 .news-card-urls {
-  margin-top: 8px;
+  margin-top: 2px;
 }
 
 .news-card-urls a {
@@ -379,6 +409,9 @@ body {
   background: rgba(255,255,255,0.05);
   padding: 2px 6px;
   border-radius: 3px;
+}
+.market-cap-badge:empty {
+  display: none;
 }
 
 .country-badge {

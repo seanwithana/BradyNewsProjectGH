@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('api', {
   // Stats
   getStats: () => ipcRenderer.invoke('get-stats'),
 
+  // Finviz enrichment
+  enqueueFinviz: (items) => ipcRenderer.invoke('enqueue-finviz', items),
+
   // Events
   onNewsFeedUpdate: (callback) => {
     ipcRenderer.on('news-feed-update', (_, data) => callback(data));
@@ -57,5 +60,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   onNewItemIngested: (callback) => {
     ipcRenderer.on('new-item-ingested', (_, data) => callback(data));
+  },
+  onFinvizUpdate: (callback) => {
+    ipcRenderer.on('finviz-update', (_, data) => callback(data));
   }
 });

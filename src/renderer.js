@@ -63,6 +63,24 @@ function buildFeedFilters() {
   return filters;
 }
 
+// Convert value strings like "6.2 M", "750 k", "1.2 B" to a number, then return a threshold color
+function valueTierColor(raw) {
+  if (!raw) return '';
+  const m = raw.match(/([\d,.]+)\s*([KMBkmb])?/);
+  if (!m) return '';
+  let num = parseFloat(m[1].replace(/,/g, ''));
+  const unit = (m[2] || '').toUpperCase();
+  if (unit === 'K') num /= 1000;       // convert to millions
+  else if (unit === 'B') num *= 1000;
+  else if (unit !== 'M') return '';     // no unit = assume raw number, skip
+  // num is now in millions
+  if (num < 5)  return '#dc2626';  // deep red
+  if (num < 10) return '#f97316';  // orange
+  if (num < 20) return '#eab308';  // yellow
+  if (num < 50) return '#4ade80';  // light green
+  return '#16a34a';                // dark green
+}
+
 function renderFeedItems(items) {
   const list = document.getElementById('news-feed-list');
 
@@ -80,6 +98,56 @@ function renderFeedItems(items) {
     const matchedKeywords = safeParseJSON(item.matched_keywords, []);
     let text = escapeHtml(item.text);
 
+    // Extract metadata fields from message text for the title section
+    let extractedMC = item.market_cap_raw || '';
+    let extractedFloat = item.float_raw || '';
+    let extractedIO = '';
+    let extractedCountry = item.country_iso2 || '';
+
+    // Extract **MC**: value (bold markdown format, e.g. **MC**: 6.2 M)
+    const mcBoldMatch = text.match(/\*\*MC\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+    if (mcBoldMatch) { if (!extractedMC) extractedMC = mcBoldMatch[1].trim(); }
+    // Extract backtick-wrapped market cap (e.g. `10.1 M`)
+    const mcBacktickMatch = text.match(/`\s*([\d,.]+\s*[KMBkmb])\s*`/);
+    if (mcBacktickMatch) { if (!extractedMC) extractedMC = mcBacktickMatch[1].trim(); }
+
+    // Extract **Float**: value (only if not already from DB)
+    if (!extractedFloat) {
+      const floatMatch = text.match(/\*\*Float\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+      if (floatMatch) extractedFloat = floatMatch[1].trim();
+    }
+
+    // Extract **IO**: value
+    const ioMatch = text.match(/\*\*IO\*\*:\s*([\d,.]+\s*%?)/i);
+    if (ioMatch) extractedIO = ioMatch[1].trim();
+
+    // Remove these metadata fields and their surrounding pipe separators from text
+    // Remove **MC**: value, **Float**: value, **IO**: value (with optional surrounding pipes/whitespace)
+    text = text.replace(/\s*\|\s*\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+    text = text.replace(/\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+    text = text.replace(/\s*\|\s*\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+    text = text.replace(/\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+    text = text.replace(/\s*\|\s*\*\*IO\*\*:\s*[\d,.]+\s*%?/gi, '');
+    text = text.replace(/\*\*IO\*\*:\s*[\d,.]+\s*%?\s*\|?\s*/gi, '');
+    // Remove backtick-wrapped market cap (e.g. `10.1 M`)
+    text = text.replace(/\s*`\s*[\d,.]+\s*[KMBkmb]\s*`/g, '');
+    // Remove standalone MC: format too
+    text = text.replace(/\s*\bMC:\s*[\d,.]+\s*[KMBkmb]\b/gi, '');
+
+    // Extract country: :flag_xx: format
+    if (!extractedCountry) {
+      const countryMatch = text.match(/:flag_([a-z]{2}):/i);
+      if (countryMatch) extractedCountry = countryMatch[1].toUpperCase();
+    }
+    // Remove :flag_xx: country markers from the message text
+    text = text.replace(/\s*:flag_[a-z]{2}:\s*/gi, ' ');
+    // Remove Unicode flag emojis (regional indicator pairs) and surrounding pipes/tilde
+    text = text.replace(/\s*[\u{1F1E0}-\u{1F1FF}]{2}\s*/gu, ' ');
+    // Clean up leftover tilde separator (e.g. "~ |" or standalone "~")
+    text = text.replace(/\s*~\s*\|?\s*/g, ' ');
+    // Remove empty bold blocks (** **) and trim
+    text = text.replace(/\*\*\s*\*\*/g, '').trim();
+
     // Highlight matched keywords
     for (const kw of matchedKeywords) {
       const escaped = escapeRegex(kw);
@@ -94,19 +162,24 @@ function renderFeedItems(items) {
     const borderColor = item.color || item.ruleset_color || '#6c63ff';
 
     return `
-      <div class="news-card" style="border-left-color: ${borderColor}">
+      <div class="news-card" data-news-item-id="${item.news_item_id}" style="border-left-color: ${borderColor}">
         <div class="news-card-header">
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
-            ${item.market_cap_raw ? `<span class="market-cap-badge">MC: ${escapeHtml(item.market_cap_raw)}</span>` : ''}
-            ${item.country_iso2 ? `<span class="country-badge">${escapeHtml(item.country_iso2)}</span>` : ''}
+            <span class="market-cap-badge finviz-cap" style="color:${valueTierColor(extractedMC)}">${extractedMC ? `Cap: ${escapeHtml(extractedMC)}` : ''}</span>
+            <span class="market-cap-badge finviz-float" style="color:${valueTierColor(extractedFloat)}">${extractedFloat ? `Float: ${escapeHtml(extractedFloat)}` : ''}</span>
+            ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
+            ${extractedCountry ? `<span class="country-badge">${escapeHtml(extractedCountry)}</span>` : ''}
           </div>
-          <span class="news-card-ruleset" style="background:${borderColor}22;color:${borderColor}">
-            ${escapeHtml(item.ruleset_name || '')}
-            ${matchedKeywords.length > 0 ? ` [${matchedKeywords.map(k => escapeHtml(k)).join(', ')}]` : ''}
-          </span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="news-card-ruleset" style="background:${borderColor}22;color:${borderColor}">
+              ${escapeHtml(item.ruleset_name || '')}
+              ${matchedKeywords.length > 0 ? ` [${matchedKeywords.map(k => escapeHtml(k)).join(', ')}]` : ''}
+            </span>
+            <span class="news-card-source">${escapeHtml(item.source_type || '')}</span>
+          </div>
         </div>
-        <div class="news-card-body">${text}</div>
+        <div class="news-card-body" style="color:#ffffff">${text}</div>
         ${urls.length > 0 ? `
           <div class="news-card-urls">
             ${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}
@@ -119,6 +192,19 @@ function renderFeedItems(items) {
         </div>
       </div>`;
   }).join(''); });
+
+  // Enqueue finviz lookups for items missing cap or float
+  const finvizRequests = items
+    .filter(item => item.ticker_symbol && (!item.market_cap_raw || !item.float_raw))
+    .map(item => ({
+      ticker: item.ticker_symbol,
+      newsItemId: item.news_item_id,
+      needsCap: !item.market_cap_raw,
+      needsFloat: !item.float_raw
+    }));
+  if (finvizRequests.length > 0) {
+    window.api.enqueueFinviz(finvizRequests);
+  }
 }
 
 // ── Discord Text Formatting ──
@@ -185,7 +271,7 @@ function formatDiscordText(text) {
       case 'F': formatted = date.toLocaleString([], {dateStyle:'full',timeStyle:'short'}); break;
       default: formatted = date.toLocaleString(); break;
     }
-    return `<span style="background:rgba(88,101,242,0.15);padding:1px 4px;border-radius:3px;color:#b5bac1" title="${date.toISOString()}">${formatted}</span>`;
+    return `<span style="background:rgba(88,101,242,0.15);padding:1px 4px;border-radius:3px;color:#ffffff" title="${date.toISOString()}">${formatted}</span>`;
   });
 
   // Discord links: [text](<url>) -> clickable link (strip angle brackets)
@@ -209,8 +295,8 @@ function formatDiscordText(text) {
   // Inline code: `text`
   text = text.replace(/`([^`]+?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px;font-family:monospace">$1</code>');
   // Blockquote: > text (with optional bullet *)
-  text = text.replace(/^&gt; \* (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#b5bac1;margin:2px 0">• $1</div>');
-  text = text.replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#b5bac1;margin:2px 0">$1</div>');
+  text = text.replace(/^&gt; \* (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#ffffff;margin:2px 0">• $1</div>');
+  text = text.replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#ffffff;margin:2px 0">$1</div>');
 
   return text;
 }
@@ -251,7 +337,7 @@ function renderLLMResponse(item) {
   const modelTag = item.llm_model ? `<span class="llm-model">${escapeHtml(item.llm_model)}</span>` : '';
   const scoreTag = item.llm_score != null ? `<span class="llm-score-badge ${item.llm_score >= 0 ? 'positive' : 'negative'}">Score: ${item.llm_score}</span>` : '';
 
-  return `<div class="llm-response"><div class="llm-header">LLM Analysis ${modelTag}${scoreTag}</div>${html}</div>`;
+  return `<div class="llm-response"><details open><summary class="llm-header">AI Analysis ${modelTag}${scoreTag}</summary>${html}</details></div>`;
 }
 
 function formatFieldLabel(key) {
@@ -351,6 +437,53 @@ async function refreshAllNews() {
   preserveScroll(list, () => {
     list.innerHTML = items.map(item => {
       let text = escapeHtml(item.text);
+
+      // Extract metadata fields from message text for the title section
+      let extractedMC = item.market_cap_raw || '';
+      let extractedFloat = '';
+      let extractedIO = '';
+      let extractedCountry = item.country_iso2 || '';
+
+      // Extract **MC**: value (bold markdown format)
+      const mcBoldMatch = text.match(/\*\*MC\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+      if (mcBoldMatch) { if (!extractedMC) extractedMC = mcBoldMatch[1].trim(); }
+      // Extract backtick-wrapped market cap (e.g. `10.1 M`)
+      const mcBacktickMatch = text.match(/`\s*([\d,.]+\s*[KMBkmb])\s*`/);
+      if (mcBacktickMatch) { if (!extractedMC) extractedMC = mcBacktickMatch[1].trim(); }
+
+      // Extract **Float**: value
+      const floatMatch = text.match(/\*\*Float\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+      if (floatMatch) extractedFloat = floatMatch[1].trim();
+
+      // Extract **IO**: value
+      const ioMatch = text.match(/\*\*IO\*\*:\s*([\d,.]+\s*%?)/i);
+      if (ioMatch) extractedIO = ioMatch[1].trim();
+
+      // Remove these metadata fields and their surrounding pipe separators from text
+      text = text.replace(/\s*\|\s*\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+      text = text.replace(/\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+      text = text.replace(/\s*\|\s*\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+      text = text.replace(/\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+      text = text.replace(/\s*\|\s*\*\*IO\*\*:\s*[\d,.]+\s*%?/gi, '');
+      text = text.replace(/\*\*IO\*\*:\s*[\d,.]+\s*%?\s*\|?\s*/gi, '');
+      // Remove backtick-wrapped market cap
+      text = text.replace(/\s*`\s*[\d,.]+\s*[KMBkmb]\s*`/g, '');
+      text = text.replace(/\s*\bMC:\s*[\d,.]+\s*[KMBkmb]\b/gi, '');
+
+      // Extract country: :flag_xx: format
+      if (!extractedCountry) {
+        const countryMatch = text.match(/:flag_([a-z]{2}):/i);
+        if (countryMatch) extractedCountry = countryMatch[1].toUpperCase();
+      }
+      // Remove :flag_xx: country markers from the message text
+      text = text.replace(/\s*:flag_[a-z]{2}:\s*/gi, ' ');
+      // Remove Unicode flag emojis (regional indicator pairs) and surrounding pipes/tilde
+      text = text.replace(/\s*[\u{1F1E0}-\u{1F1FF}]{2}\s*/gu, ' ');
+      // Clean up leftover tilde separator
+      text = text.replace(/\s*~\s*\|?\s*/g, ' ');
+      // Remove empty bold blocks (** **) and trim
+      text = text.replace(/\*\*\s*\*\*/g, '').trim();
+
       text = formatDiscordText(text);
       const urls = safeParseJSON(item.urls_json, []);
 
@@ -359,12 +492,14 @@ async function refreshAllNews() {
           <div class="news-card-header">
             <div style="display:flex;gap:8px;align-items:center">
               <span class="news-card-ticker">${escapeHtml(item.ticker_symbol || 'N/A')}</span>
-              ${item.market_cap_raw ? `<span class="market-cap-badge">MC: ${escapeHtml(item.market_cap_raw)}</span>` : ''}
-              ${item.country_iso2 ? `<span class="country-badge">${escapeHtml(item.country_iso2)}</span>` : ''}
+              ${extractedMC ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedMC)}">Cap: ${escapeHtml(extractedMC)}</span>` : ''}
+              ${extractedFloat ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedFloat)}">Float: ${escapeHtml(extractedFloat)}</span>` : ''}
+              ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
+              ${extractedCountry ? `<span class="country-badge">${escapeHtml(extractedCountry)}</span>` : ''}
             </div>
             <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
           </div>
-          <div class="news-card-body">${text}</div>
+          <div class="news-card-body" style="color:#ffffff">${text}</div>
           ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
           <div class="news-card-timestamps">
             <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
@@ -1353,6 +1488,27 @@ window.api.onNewItemIngested(() => {
   if (document.querySelector('.tab-btn[data-tab="news-feed"]').classList.contains('active')) {
     refreshFeed();
   }
+});
+
+// Finviz async updates — patch cards in-place without re-rendering
+window.api.onFinvizUpdate((data) => {
+  const cards = document.querySelectorAll(`.news-card[data-news-item-id="${data.newsItemId}"]`);
+  cards.forEach(card => {
+    if (data.marketCapRaw) {
+      const capEl = card.querySelector('.finviz-cap');
+      if (capEl) {
+        capEl.textContent = `Cap: ${data.marketCapRaw}`;
+        capEl.style.color = valueTierColor(data.marketCapRaw);
+      }
+    }
+    if (data.floatRaw) {
+      const floatEl = card.querySelector('.finviz-float');
+      if (floatEl) {
+        floatEl.textContent = `Float: ${data.floatRaw}`;
+        floatEl.style.color = valueTierColor(data.floatRaw);
+      }
+    }
+  });
 });
 
 // ── Scroll Preservation ──

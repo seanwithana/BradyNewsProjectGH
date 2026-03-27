@@ -151,6 +151,13 @@ class BradyDatabase {
       this.db.exec("ALTER TABLE news_feed ADD COLUMN llm_score INTEGER");
     }
 
+    // Add float columns to news_items
+    const niCols = this.db.prepare("PRAGMA table_info(news_items)").all();
+    if (!niCols.find(c => c.name === 'float_raw')) {
+      this.db.exec("ALTER TABLE news_items ADD COLUMN float_raw TEXT");
+      this.db.exec("ALTER TABLE news_items ADD COLUMN float_value REAL");
+    }
+
   }
 
   // ── News Items ──
@@ -169,6 +176,22 @@ class BradyDatabase {
       item.urls_json, item.source_channels_json, item.source_message_ids_json,
       item.original_timestamp, item.raw_json || null
     );
+  }
+
+  updateNewsItemFinviz(newsItemId, updates) {
+    const sets = [];
+    const params = [];
+    if (updates.marketCapRaw) {
+      sets.push('market_cap_raw = ?', 'market_cap_value = ?');
+      params.push(updates.marketCapRaw, updates.marketCapValue);
+    }
+    if (updates.floatRaw) {
+      sets.push('float_raw = ?', 'float_value = ?');
+      params.push(updates.floatRaw, updates.floatValue);
+    }
+    if (sets.length === 0) return;
+    params.push(newsItemId);
+    this.db.prepare(`UPDATE news_items SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   }
 
   getNewsItemBySourceKey(sourceKey) {
@@ -440,7 +463,8 @@ class BradyDatabase {
 
     const sql = `
       SELECT nf.*, ni.source_type, ni.ticker_symbol, ni.text, ni.country_iso2,
-             ni.market_cap_raw, ni.market_cap_value, ni.urls_json,
+             ni.market_cap_raw, ni.market_cap_value, ni.float_raw, ni.float_value,
+             ni.urls_json,
              ni.source_channels_json, ni.source_message_ids_json,
              ni.original_timestamp, ni.ingested_at,
              kr.name as ruleset_name, kr.color as ruleset_color, kr.audio_path,
@@ -462,7 +486,8 @@ class BradyDatabase {
   searchNews(query) {
     return this.db.prepare(`
       SELECT nf.*, ni.source_type, ni.ticker_symbol, ni.text, ni.country_iso2,
-             ni.market_cap_raw, ni.urls_json, ni.original_timestamp, ni.ingested_at,
+             ni.market_cap_raw, ni.float_raw, ni.float_value,
+             ni.urls_json, ni.original_timestamp, ni.ingested_at,
              kr.name as ruleset_name, kr.color as ruleset_color,
              lq.response as llm_response, lq.status as llm_status, lq.model as llm_model
       FROM news_feed nf

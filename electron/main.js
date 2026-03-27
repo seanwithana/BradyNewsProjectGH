@@ -10,6 +10,7 @@ const ApiLLMProcessor = require('./api-llm-processor');
 const { callAPI, getProviders } = require('./api-caller');
 const { fetchAllUrls } = require('./content-fetcher');
 const DiscordScraper = require('./discord-scraper');
+const finvizScraper = require('./finviz-scraper');
 
 let mainWindow;
 let database;
@@ -93,6 +94,16 @@ async function initializeBackend() {
             text: e.newsItem.text.substring(0, 200)
           }))
         });
+
+        // Async finviz lookup for items missing float or market cap
+        const needsCap = !newsItem.market_cap_raw;
+        const needsFloat = !newsItem.float_raw;
+        if (newsItem.ticker_symbol && (needsCap || needsFloat)) {
+          finvizScraper.enqueue(newsItem.ticker_symbol, newsItem.id, needsCap, needsFloat, (itemId, ticker, updates) => {
+            database.updateNewsItemFinviz(itemId, updates);
+            emit('finviz-update', { newsItemId: itemId, ticker, ...updates });
+          });
+        }
       }
     });
     discordScraper.start();
@@ -119,6 +130,16 @@ async function initializeBackend() {
 // News Feed
 ipcMain.handle('get-news-feed', (_, filters) => {
   return database.getNewsFeed(filters);
+});
+
+// Finviz enrichment — renderer sends items missing cap/float
+ipcMain.handle('enqueue-finviz', (_, items) => {
+  for (const { ticker, newsItemId, needsCap, needsFloat } of items) {
+    finvizScraper.enqueue(ticker, newsItemId, needsCap, needsFloat, (itemId, t, updates) => {
+      database.updateNewsItemFinviz(itemId, updates);
+      emit('finviz-update', { newsItemId: itemId, ticker: t, ...updates });
+    });
+  }
 });
 
 ipcMain.handle('search-news', (_, query) => {
