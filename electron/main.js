@@ -338,6 +338,60 @@ async function initializeBackend() {
     parseArticleFn: null
   });
 
+  // CFTC Commitments of Traders (Cloudflare blocked — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'CFTC COT Reports',
+    key: 'cftc',
+    sourceUrl: 'https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm',
+    workerPath: path.join(__dirname, 'cftc-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Atlanta Fed GDPNow (SPA — estimate is JS-rendered)
+  setupPuppeteerScraper({
+    name: 'Atlanta Fed GDPNow',
+    key: 'atlanta_fed',
+    sourceUrl: 'https://www.atlantafed.org/research-and-data/data/gdpnow',
+    workerPath: path.join(__dirname, 'atlantafed-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Philly Fed Manufacturing (View Full Report button is JS-rendered)
+  setupPuppeteerScraper({
+    name: 'Philly Fed Manufacturing',
+    key: 'philly_fed',
+    sourceUrl: 'https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey',
+    workerPath: path.join(__dirname, 'phillyfed-worker.js'),
+    parseArticleFn: null
+  });
+
+  // IMF World Economic Outlook (SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'IMF World Economic Outlook',
+    key: 'imf',
+    sourceUrl: 'https://www.imf.org/en/publications/weo',
+    workerPath: path.join(__dirname, 'imf-worker.js'),
+    parseArticleFn: null
+  });
+
+  // OPEC Press Releases (403 blocked, SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'OPEC Press Room',
+    key: 'opec',
+    sourceUrl: 'https://www.opec.org/press-releases.html',
+    workerPath: path.join(__dirname, 'opec-worker.js'),
+    parseArticleFn: null
+  });
+
+  // WHO Newsroom (fully SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'WHO Newsroom',
+    key: 'who',
+    sourceUrl: 'https://www.who.int/news',
+    workerPath: path.join(__dirname, 'who-worker.js'),
+    parseArticleFn: null
+  });
+
   // BLS Releases (CPI, Employment, PPI — 403 blocked, single-page releases)
   setupPuppeteerScraper({
     name: 'BLS Economic Releases',

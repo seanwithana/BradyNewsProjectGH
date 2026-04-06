@@ -1,0 +1,17 @@
+Links:
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Data-Series/bos_history.csv?sc_lang=en"
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Data-Series/bos_historyx.xls?sc_lang=en"
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Data-Series/bos_historyt.txt?sc_lang=en"
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Diffusion-Indexes/bos_dif.csv?sc_lang=en"
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Diffusion-Indexes/bos_difx.xls?sc_lang=en"
+href="/-/media/FRBP/Assets/Surveys-And-Data/MBOS/Historical-Data/Diffusion-Indexes/bos_dift.txt?sc_lang=en"
+href="/surveys-and-data/regional-economic-analysis/mbos-user-guide"
+href="/surveys-and-data/regional-economic-analysis/mbos-methodology"
+href="/surveys-and-data/regional-economic-analysis/mbos-definitions"
+href="/surveys-and-data/regional-economic-analysis/mbos-faqs"
+href="/surveys-and-data/regional-economic-analysis/mbos-methodology"
+href="/surveys-and-data/regional-economic-analysis/mbos-user-guide"
+href="/surveys-and-data/regional-economic-analysis/mbos-faqs"
+---
+Buttons:
+<a href="/calendar-of-events?release=manufacturing-business-outlook-survey">See full calendar</a>

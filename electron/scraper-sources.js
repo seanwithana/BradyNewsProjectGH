@@ -119,6 +119,232 @@ function parseFTCArticle(html) {
 }
 
 // ════════════════════════════════════════════
+// SOURCE 52: PHILLY FED MANUFACTURING
+// ════════════════════════════════════════════
+function parsePhillyFed(html) {
+  const items = [];
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  // Find release calendar entries
+  const calIdx = text.indexOf('Release Calendar');
+  if (calIdx > -1) {
+    const calSection = text.substring(calIdx, calIdx + 500);
+    // Match entries like "Apr 16 2026 April Manufacturing Business Outlook Survey 8:30 a.m."
+    const regex = /(\w{3}\s+\d{1,2}\s+\d{4})\s+(.*?(?:Survey|Report))\s+\d{1,2}:\d{2}/g;
+    let m;
+    while ((m = regex.exec(calSection)) !== null) {
+      const date = m[1];
+      const title = m[2].trim();
+      const id = date + '_' + title;
+      if (!items.find(i => i.id === id))
+        items.push({ id, title: date + ' — ' + title, text: date + ' — ' + title, url: 'https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey', timestamp: new Date().toISOString() });
+    }
+  }
+  // Also detect if actual survey results appear (after release)
+  const surveyIdx = text.search(/Manufacturing activity|current general activity index/i);
+  if (surveyIdx > -1) {
+    const surveyText = text.substring(surveyIdx, surveyIdx + 1000);
+    items.unshift({ id: 'latest_survey', title: 'Philly Fed Manufacturing Survey — Latest Results', text: surveyText, url: 'https://www.philadelphiafed.org/surveys-and-data/regional-economic-analysis/manufacturing-business-outlook-survey', timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 53: NY FED EMPIRE STATE
+// ════════════════════════════════════════════
+function parseNYFed(html) {
+  const items = [];
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const idx = text.indexOf('general business conditions');
+  if (idx > -1) {
+    const content = text.substring(Math.max(0, idx - 50), idx + 2000).trim();
+    // Extract headline — e.g. "index fell seven points to -0.2"
+    const headlineMatch = content.match(/(?:headline\s+)?general business conditions index\s+(?:fell|rose|increased|declined|was unchanged)[^.]+\./i);
+    const title = headlineMatch ? 'Empire State Manufacturing: ' + headlineMatch[0] : 'Empire State Manufacturing Survey — Latest';
+    items.push({
+      id: 'https://www.newyorkfed.org/survey/empire/empiresurvey_overview',
+      title,
+      text: content.substring(0, 3000),
+      url: 'https://www.newyorkfed.org/survey/empire/empiresurvey_overview',
+      timestamp: new Date().toISOString()
+    });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 51: CENSUS RETAIL SALES
+// ════════════════════════════════════════════
+function parseCensusRetail(html) {
+  const items = [];
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Find the latest report info from page text
+  const releaseMatch = text.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s+release\s+for\s+[\s\S]{20,200}?(?:scheduled|released)[^.]*\.)/i);
+  const pdfMatch = html.match(/href="([^"]*marts_current\.pdf)"/i);
+  const pdfUrl = pdfMatch ? 'https://www.census.gov/retail/' + pdfMatch[1].replace(/^\//, '') : '';
+
+  const title = releaseMatch ? releaseMatch[1].replace(/\s+/g, ' ').trim() : 'Census Advance Monthly Retail Trade Report';
+  items.push({
+    id: pdfUrl || 'https://www.census.gov/retail/sales.html',
+    title,
+    text: title + (pdfUrl ? '\n\nReport PDF: ' + pdfUrl : ''),
+    url: pdfUrl || 'https://www.census.gov/retail/sales.html',
+    timestamp: new Date().toISOString()
+  });
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 50: ADP EMPLOYMENT REPORT
+// ════════════════════════════════════════════
+function parseADP(html) {
+  const items = [];
+  // Extract the headline from social share meta or text
+  const titleMatch = html.match(/Private employers added [\d,]+ jobs in \w+/i)
+                  || html.match(/ADP National Employment Report \w+ \d{4}/i);
+  // Find the PDF link
+  const pdfMatch = html.match(/href="(https:\/\/adp-ri-nrip-static[^"]+\.pdf)"/i);
+  const pdfUrl = pdfMatch ? pdfMatch[1] : '';
+  // Get the report text from the page
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const jobsIdx = text.search(/Private employers/i);
+  const reportText = jobsIdx > -1 ? text.substring(jobsIdx, jobsIdx + 1000) : '';
+
+  if (titleMatch || pdfUrl) {
+    const title = titleMatch ? titleMatch[0] : 'ADP National Employment Report';
+    items.push({
+      id: pdfUrl || 'https://adpemploymentreport.com/',
+      title,
+      text: title + '\n\n' + reportText + (pdfUrl ? '\n\nReport PDF: ' + pdfUrl : ''),
+      url: pdfUrl || 'https://adpemploymentreport.com/',
+      timestamp: new Date().toISOString()
+    });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 48: ESA NEWSROOM
+// ════════════════════════════════════════════
+function parseESA(html) {
+  const items = [];
+  const regex = /<a[^>]*href="(\/(?:Newsroom|Press_Releases|Science_Exploration|Applications|Enabling_Support|Space_Safety)\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    const url = 'https://www.esa.int' + m[1];
+    if (title.length < 15 || items.find(i => i.id === url)) continue;
+    items.push({ id: url, title, text: title, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseESAArticle(html) {
+  const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i) || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (article) return article[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000);
+  return '';
+}
+
+// ════════════════════════════════════════════
+// SOURCE 46: NASA NEWS RELEASES
+// ════════════════════════════════════════════
+function parseNASA(html) {
+  const items = [];
+  const regex = /<a[^>]*href="(https:\/\/www\.nasa\.gov\/news-release\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    if (title.length < 15 || items.find(i => i.id === m[1])) continue;
+    items.push({ id: m[1], title, text: title, url: m[1], timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseNASAArticle(html) {
+  const entryIdx = html.indexOf('entry-content');
+  if (entryIdx > -1) {
+    const section = html.substring(entryIdx, entryIdx + 20000);
+    const paras = section.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
+    return paras.map(p => p.replace(/<[^>]+>/g, '').trim()).filter(t => t.length > 20).join(' ');
+  }
+  const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (main) return main[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000);
+  return '';
+}
+
+// ════════════════════════════════════════════
+// SOURCE 44: BANK OF ENGLAND MONETARY POLICY
+// ════════════════════════════════════════════
+function parseBOE(html) {
+  const items = [];
+  const regex = /<a[^>]*href="(\/monetary-policy-summary-and-minutes\/\d{4}\/[^"]+)"[^>]*>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const url = 'https://www.bankofengland.co.uk' + m[1];
+    // Extract date from URL: .../2026/march-2026
+    const dateMatch = m[1].match(/(\d{4})\/([a-z]+-\d{4})/);
+    const title = dateMatch ? 'MPC Decision — ' + dateMatch[2].replace('-', ' ') : 'MPC Decision';
+    if (!items.find(i => i.id === url))
+      items.push({ id: url, title, text: title, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseBOEArticle(html) {
+  const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (main) {
+    return main[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000);
+  }
+  return '';
+}
+
+// ════════════════════════════════════════════
+// SOURCE 43: BANK OF JAPAN DECISIONS
+// ════════════════════════════════════════════
+function parseBOJ(html) {
+  const items = [];
+  // BOJ statements are PDF links with pattern /mpr_YYYY/kYYMMDDa.pdf
+  const regex = /<a[^>]*href="([^"]*mpr_\d{4}\/[^"]+\.pdf)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    let url = m[1];
+    if (url.startsWith('/')) url = 'https://www.boj.or.jp' + url;
+    // Extract date from filename: k260319a.pdf -> March 19, 2026
+    const dateMatch = url.match(/k(\d{2})(\d{2})(\d{2})/);
+    const dateStr = dateMatch ? `20${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : '';
+    if (title.length < 5 || items.find(i => i.id === url)) continue;
+    items.push({ id: url, title: title + (dateStr ? ' (' + dateStr + ')' : ''), text: title + '\n\nStatement PDF: ' + url, url, timestamp: dateStr || new Date().toISOString() });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 42: ECB MONETARY POLICY
+// ════════════════════════════════════════════
+function parseECB(html) {
+  const items = [];
+  const regex = /<a[^>]*href="([^"]*\/press\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    let url = m[1];
+    if (url.startsWith('/')) url = 'https://www.ecb.europa.eu' + url;
+    if (title.length < 15 || items.find(i => i.id === url)) continue;
+    items.push({ id: url, title, text: title, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseECBArticle(html) {
+  const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i) || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (article) {
+    return article[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+// ════════════════════════════════════════════
 // SOURCE 41: SAFKHET CAPITAL
 // ════════════════════════════════════════════
 function parseSafkhet(html) {
@@ -1062,6 +1288,79 @@ const SOURCES = [
   { name: 'Elliott Letters', key: 'elliott', url: 'https://elliottletters.com/wp-json/wp/v2/posts?per_page=10&_fields=id,title,link,date,content', interval: 5000, parseFn: parseWPAPI, parseArticleFn: null, headers: { 'Accept': 'application/json' } },
   { name: 'UAW News', key: 'uaw', url: 'https://uaw.org/wp-json/wp/v2/posts?per_page=10&_fields=id,title,link,date,content', interval: 5000, parseFn: parseWPAPI, parseArticleFn: null, headers: { 'Accept': 'application/json' } },
   { name: 'Teamsters Press', key: 'teamsters', url: 'https://teamster.org/wp-json/wp/v2/posts?per_page=10&_fields=id,title,link,date,content', interval: 5000, parseFn: parseWPAPI, parseArticleFn: null, headers: { 'Accept': 'application/json' } },
+  // Philly Fed Manufacturing — handled by puppeteer worker in main.js
+  // ── SOURCE 53: NY FED EMPIRE STATE ──
+  {
+    name: 'NY Fed Empire State',
+    key: 'ny_fed',
+    url: 'https://www.newyorkfed.org/survey/empire/empiresurvey_overview',
+    interval: 5000,
+    parseFn: parseNYFed,
+    parseArticleFn: null
+  },
+  // ── SOURCE 51: CENSUS RETAIL SALES ──
+  {
+    name: 'Census Retail Sales',
+    key: 'census_retail',
+    url: 'https://www.census.gov/retail/sales.html',
+    interval: 5000,
+    parseFn: parseCensusRetail,
+    parseArticleFn: null
+  },
+  // ── SOURCE 50: ADP EMPLOYMENT REPORT ──
+  {
+    name: 'ADP Employment Report',
+    key: 'adp',
+    url: 'https://adpemploymentreport.com/',
+    interval: 5000,
+    parseFn: parseADP,
+    parseArticleFn: null
+  },
+  // ── SOURCE 48: ESA NEWSROOM ──
+  {
+    name: 'ESA Newsroom',
+    key: 'esa',
+    url: 'https://www.esa.int/Newsroom',
+    interval: 5000,
+    parseFn: parseESA,
+    parseArticleFn: parseESAArticle
+  },
+  // ── SOURCE 46: NASA NEWS RELEASES ──
+  {
+    name: 'NASA News Releases',
+    key: 'nasa',
+    url: 'https://www.nasa.gov/2026-news-releases/',
+    interval: 5000,
+    parseFn: parseNASA,
+    parseArticleFn: parseNASAArticle
+  },
+  // ── SOURCE 44: BANK OF ENGLAND MONETARY POLICY ──
+  {
+    name: 'Bank of England Policy',
+    key: 'boe',
+    url: 'https://www.bankofengland.co.uk/monetary-policy',
+    interval: 5000,
+    parseFn: parseBOE,
+    parseArticleFn: parseBOEArticle
+  },
+  // ── SOURCE 43: BANK OF JAPAN DECISIONS ──
+  {
+    name: 'Bank of Japan Decisions',
+    key: 'boj',
+    url: 'https://www.boj.or.jp/en/mopo/mpmdeci/state_2026/index.htm',
+    interval: 5000,
+    parseFn: parseBOJ,
+    parseArticleFn: null
+  },
+  // ── SOURCE 42: ECB MONETARY POLICY ──
+  {
+    name: 'ECB Monetary Policy',
+    key: 'ecb',
+    url: 'https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html',
+    interval: 5000,
+    parseFn: parseECB,
+    parseArticleFn: parseECBArticle
+  },
 ];
 
 module.exports = SOURCES;
