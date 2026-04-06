@@ -149,6 +149,141 @@ function parsePhillyFed(html) {
 }
 
 // ════════════════════════════════════════════
+// SOURCE 66: BANK OF CANADA
+// ════════════════════════════════════════════
+function parseBOC(html) {
+  const items = [];
+  const regex = /<a[^>]*href="(https:\/\/www\.bankofcanada\.ca\/\d{4}\/\d{2}\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    if (title.length < 15 || items.find(i => i.id === m[1])) continue;
+    items.push({ id: m[1], title, text: title, url: m[1], timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseBOCArticle(html) {
+  const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i) || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (article) return article[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000);
+  return '';
+}
+
+// ════════════════════════════════════════════
+// SOURCE 67: RBA MEDIA RELEASES
+// ════════════════════════════════════════════
+function parseRBA(html) {
+  const items = [];
+  const regex = /<a[^>]*href="(\/media-releases\/\d{4}\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    const url = 'https://www.rba.gov.au' + m[1];
+    if (title.length < 15 || items.find(i => i.id === url)) continue;
+    items.push({ id: url, title, text: title, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+function parseRBAArticle(html) {
+  const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i) || html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (article) return article[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 5000);
+  return '';
+}
+
+// ════════════════════════════════════════════
+// SOURCES 62-64: CENSUS DATA PAGES
+// ════════════════════════════════════════════
+function parseCensusPage(html) {
+  const items = [];
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  // Find the release info
+  const releaseMatch = text.match(/((?:The\s+)?(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s+release[\s\S]{20,300}?(?:scheduled|released|rescheduled)[^.]*\.)/i);
+  // Find PDF links
+  const pdfs = html.match(/href="([^"]+\.pdf)"/gi) || [];
+  const pdfUrl = pdfs.length > 0 ? pdfs[0].match(/"([^"]+)"/)[1] : '';
+  const fullPdf = pdfUrl.startsWith('http') ? pdfUrl : (pdfUrl.startsWith('/') ? 'https://www.census.gov' + pdfUrl : '');
+  const title = releaseMatch ? releaseMatch[1].replace(/\s+/g, ' ').trim().substring(0, 150) : 'Census Data Release';
+  items.push({
+    id: fullPdf || 'census_page',
+    title,
+    text: title + (fullPdf ? '\n\nReport PDF: ' + fullPdf : ''),
+    url: fullPdf || 'https://www.census.gov/',
+    timestamp: new Date().toISOString()
+  });
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 65: WTO DISPUTE SETTLEMENT
+// ════════════════════════════════════════════
+function parseWTO(html) {
+  const items = [];
+  const regex = /<a[^>]*href="([^"]+)"[^>]*>([^<]*DS\d+[^<]*)<\/a>/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const title = stripHtml(m[2]);
+    let url = m[1];
+    if (url.startsWith('/')) url = 'https://www.wto.org' + url;
+    if (!items.find(i => i.id === url))
+      items.push({ id: url, title, text: title, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 57: USDA WASDE REPORT
+// ════════════════════════════════════════════
+function parseWASDE(html) {
+  const items = [];
+  // Find WASDE PDF links — pattern: wasdeMMYY.pdf
+  const regex = /href="(https:\/\/www\.usda\.gov\/oce\/commodity\/wasde\/wasde\d{4}\.pdf)"/gi;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const url = m[1];
+    // Extract month/year from filename: wasde0426 = April 2026
+    const dateMatch = url.match(/wasde(\d{2})(\d{2})\.pdf/);
+    const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+    let title = 'WASDE Report';
+    if (dateMatch) {
+      const monthNum = parseInt(dateMatch[1]);
+      const year = '20' + dateMatch[2];
+      title = 'WASDE Report — ' + (months[monthNum] || dateMatch[1]) + ' ' + year;
+    }
+    if (!items.find(i => i.id === url))
+      items.push({ id: url, title, text: title + '\n\nReport PDF: ' + url, url, timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
+// SOURCE 56: SUPREME COURT OPINIONS
+// ════════════════════════════════════════════
+function parseSCOTUS(html) {
+  const items = [];
+  // Parse table rows — each row has: R#, Date, Docket, Name, Justice, Citation
+  const rows = html.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+  for (const row of rows.slice(1)) { // skip header
+    const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+    if (cells.length < 4) continue;
+    const cellTexts = cells.map(c => c.replace(/<[^>]+>/g, '').trim());
+    // cells: [R#, Date, Docket, Name, ...]
+    const date = cellTexts[1] || '';
+    const docket = cellTexts[2] || '';
+    const name = cellTexts[3] || '';
+    if (!name || name.length < 3) continue;
+    // Find PDF link in the row
+    const pdfMatch = row.match(/href="([^"]+\.pdf)"/i);
+    const pdfUrl = pdfMatch ? 'https://www.supremecourt.gov/opinions/' + pdfMatch[1].replace(/^\.\.\//, '') : '';
+    const title = `${date} — ${docket} ${name}`;
+    const id = docket || title;
+    if (!items.find(i => i.id === id))
+      items.push({ id, title, text: title + (pdfUrl ? '\n\nOpinion PDF: ' + pdfUrl : ''), url: pdfUrl || 'https://www.supremecourt.gov/opinions/slipopinion/25', timestamp: new Date().toISOString() });
+  }
+  return items;
+}
+
+// ════════════════════════════════════════════
 // SOURCE 53: NY FED EMPIRE STATE
 // ════════════════════════════════════════════
 function parseNYFed(html) {
@@ -1289,6 +1424,24 @@ const SOURCES = [
   { name: 'UAW News', key: 'uaw', url: 'https://uaw.org/wp-json/wp/v2/posts?per_page=10&_fields=id,title,link,date,content', interval: 5000, parseFn: parseWPAPI, parseArticleFn: null, headers: { 'Accept': 'application/json' } },
   { name: 'Teamsters Press', key: 'teamsters', url: 'https://teamster.org/wp-json/wp/v2/posts?per_page=10&_fields=id,title,link,date,content', interval: 5000, parseFn: parseWPAPI, parseArticleFn: null, headers: { 'Accept': 'application/json' } },
   // Philly Fed Manufacturing — handled by puppeteer worker in main.js
+  // ── SOURCE 57: USDA WASDE REPORT ──
+  {
+    name: 'USDA WASDE Report',
+    key: 'usda_wasde',
+    url: 'https://www.usda.gov/about-usda/general-information/staff-offices/office-chief-economist/commodity-markets/wasde-report',
+    interval: 5000,
+    parseFn: parseWASDE,
+    parseArticleFn: null
+  },
+  // ── SOURCE 56: SUPREME COURT OPINIONS ──
+  {
+    name: 'Supreme Court Opinions',
+    key: 'scotus',
+    url: 'https://www.supremecourt.gov/opinions/slipopinion/25',
+    interval: 5000,
+    parseFn: parseSCOTUS,
+    parseArticleFn: null
+  },
   // ── SOURCE 53: NY FED EMPIRE STATE ──
   {
     name: 'NY Fed Empire State',
@@ -1360,6 +1513,56 @@ const SOURCES = [
     interval: 5000,
     parseFn: parseECB,
     parseArticleFn: parseECBArticle
+  },
+  // ── SOURCES 62-65: CENSUS DATA + WTO ──
+  {
+    name: 'Census New Home Sales',
+    key: 'census_newhomes',
+    url: 'https://www.census.gov/construction/nrs/current/index.html',
+    interval: 5000,
+    parseFn: parseCensusPage,
+    parseArticleFn: null
+  },
+  {
+    name: 'Census Housing Starts',
+    key: 'census_starts',
+    url: 'https://www.census.gov/construction/nrc/index.html',
+    interval: 5000,
+    parseFn: parseCensusPage,
+    parseArticleFn: null
+  },
+  {
+    name: 'Census Durable Goods',
+    key: 'census_durables',
+    url: 'https://www.census.gov/manufacturing/m3/adv/current/index.html',
+    interval: 5000,
+    parseFn: parseCensusPage,
+    parseArticleFn: null
+  },
+  {
+    name: 'WTO Dispute Settlement',
+    key: 'wto',
+    url: 'https://www.wto.org/english/tratop_e/dispu_e/dispu_e.htm',
+    interval: 5000,
+    parseFn: parseWTO,
+    parseArticleFn: null
+  },
+  // ── SOURCES 66-67: BANK OF CANADA + RBA ──
+  {
+    name: 'Bank of Canada',
+    key: 'boc',
+    url: 'https://www.bankofcanada.ca/press/',
+    interval: 5000,
+    parseFn: parseBOC,
+    parseArticleFn: parseBOCArticle
+  },
+  {
+    name: 'RBA Media Releases',
+    key: 'rba',
+    url: 'https://www.rba.gov.au/media-releases/',
+    interval: 5000,
+    parseFn: parseRBA,
+    parseArticleFn: parseRBAArticle
   },
 ];
 

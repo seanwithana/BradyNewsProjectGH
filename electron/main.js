@@ -338,6 +338,42 @@ async function initializeBackend() {
     parseArticleFn: null
   });
 
+  // Dallas Fed Manufacturing (SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'Dallas Fed Manufacturing',
+    key: 'dallas_fed',
+    sourceUrl: 'https://www.dallasfed.org/research/surveys/tmos',
+    workerPath: path.join(__dirname, 'dallasfed-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Peterson Institute PIIE (articles have Cloudflare — puppeteer for content)
+  setupPuppeteerScraper({
+    name: 'Peterson Institute (PIIE)',
+    key: 'piie',
+    sourceUrl: 'https://www.piie.com/blogs',
+    workerPath: path.join(__dirname, 'piie-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Research Affiliates (SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'Research Affiliates',
+    key: 'researchaffil',
+    sourceUrl: 'https://www.researchaffiliates.com/insights/publications',
+    workerPath: path.join(__dirname, 'researchaffil-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Starboard Value (JS-rendered presentations page)
+  setupPuppeteerScraper({
+    name: 'Starboard Value',
+    key: 'starboard',
+    sourceUrl: 'https://www.starboardvalue.com/presentations/',
+    workerPath: path.join(__dirname, 'starboard-worker.js'),
+    parseArticleFn: null
+  });
+
   // CFTC Commitments of Traders (Cloudflare blocked — requires puppeteer)
   setupPuppeteerScraper({
     name: 'CFTC COT Reports',
