@@ -1,19 +1,29 @@
-const { BrowserWindow } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const ACCOUNT_ID = '107780257626128497'; // @realDonaldTrump
-const POLL_INTERVAL = 1000; // 1 second
 const LOG_PATH = path.join(__dirname, '..', 'data', 'truth.log');
+const WORKER_PATH = path.join(__dirname, 'truth-worker.js');
 
+/**
+ * Truth Social scraper — runs puppeteer-core in a separate Node process.
+ * Completely isolated from the main Electron app.
+ */
 class TruthScraper {
   constructor(onNewPost) {
     this.onNewPost = onNewPost;
     this.seenIds = new Set();
     this.posts = [];
-    this.timer = null;
     this.running = false;
-    this.fetchWin = null;
+    this.child = null;
+    this.status = 'not started';
+    this.statusMessage = '';
+    this.lastSuccessAt = null;
+    this.lastErrorAt = null;
+    this.lastErrorMessage = '';
+    this.postsFetched = 0;
+    this.pollCount = 0;
+    this.errorCount = 0;
   }
 
   log(msg) {
@@ -24,103 +34,87 @@ class TruthScraper {
   start() {
     if (this.running) return;
     this.running = true;
-    this.log('Truth Social scraper started');
+    this.status = 'connecting';
+    this.statusMessage = 'Launching worker...';
+    this.log('Truth Social scraper started (puppeteer worker)');
 
-    // Create a hidden browser window for fetching (handles Cloudflare)
-    this.fetchWin = new BrowserWindow({
-      show: false,
-      width: 400,
-      height: 400,
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    // Spawn as completely separate Node process using system node
+    this.child = spawn('node', [WORKER_PATH], {
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc']
     });
 
-    // First visit the site so Cloudflare cookies get set
-    this.fetchWin.loadURL('https://truthsocial.com/@realDonaldTrump');
-    this.fetchWin.webContents.on('did-finish-load', () => {
-      this.log('Initial page loaded, starting polls');
-      setTimeout(() => this.poll(), 2000);
-      this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+    this.child.on('message', (msg) => {
+      if (msg.type === 'status') {
+        this.status = msg.status;
+        this.statusMessage = msg.message;
+        this.pollCount++;
+        if (msg.status === 'connected') {
+          this.lastSuccessAt = new Date().toISOString();
+        } else if (msg.status === 'error') {
+          this.errorCount++;
+          this.lastErrorAt = new Date().toISOString();
+          this.lastErrorMessage = msg.message;
+          this.log(`Error: ${msg.message}`);
+        }
+      } else if (msg.type === 'posts') {
+        this.processPosts(msg.posts);
+      }
     });
-    this.fetchWin.webContents.on('did-fail-load', () => {
-      this.log('Initial page load failed, starting polls anyway');
-      setTimeout(() => this.poll(), 5000);
-      this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+
+    this.child.on('exit', (code) => {
+      this.log(`Worker exited with code ${code}`);
+      this.child = null;
+      if (this.running) {
+        this.status = 'error';
+        this.statusMessage = `Worker exited (code ${code}), restarting in 30s...`;
+        setTimeout(() => { if (this.running) this.start(); }, 30000);
+      }
+    });
+
+    this.child.stderr.on('data', (data) => {
+      const msg = data.toString().trim();
+      if (msg && !msg.includes('DevTools') && !msg.includes('GPU') && !msg.includes('sandbox')) {
+        this.log(`Worker stderr: ${msg.substring(0, 200)}`);
+      }
     });
   }
 
   stop() {
     this.running = false;
-    if (this.timer) { clearInterval(this.timer); this.timer = null; }
-    if (this.fetchWin && !this.fetchWin.isDestroyed()) {
-      this.fetchWin.close();
-      this.fetchWin = null;
+    if (this.child) {
+      try { this.child.send('quit'); } catch {}
+      setTimeout(() => { if (this.child) try { this.child.kill(); } catch {} }, 5000);
     }
     this.log('Truth Social scraper stopped');
   }
 
-  poll() {
-    if (!this.running || !this.fetchWin || this.fetchWin.isDestroyed()) return;
-    const url = `https://truthsocial.com/api/v1/accounts/${ACCOUNT_ID}/statuses?limit=20&exclude_replies=true`;
-
-    this.fetchWin.webContents.executeJavaScript(`
-      fetch("${url}", { headers: { 'Accept': 'application/json' } })
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(data => JSON.stringify(data))
-        .catch(e => JSON.stringify({ error: e.message }))
-    `).then(result => {
-      try {
-        const parsed = JSON.parse(result);
-        if (parsed.error) {
-          this.log(`Fetch error: ${parsed.error}`);
-          return;
-        }
-        this.processPosts(parsed);
-      } catch (e) {
-        this.log(`Parse error: ${e.message}`);
-      }
-    }).catch(e => {
-      this.log(`executeJS error: ${e.message}`);
-    });
-  }
-
   processPosts(apiPosts) {
     if (!Array.isArray(apiPosts)) return;
-
     const newPosts = [];
     for (const raw of apiPosts) {
       if (this.seenIds.has(raw.id)) continue;
       this.seenIds.add(raw.id);
-
-      const post = {
+      newPosts.push({
         id: raw.id,
         text: this.stripHtml(raw.content || ''),
         htmlContent: raw.content || '',
         createdAt: raw.created_at,
         url: raw.url || `https://truthsocial.com/@realDonaldTrump/${raw.id}`,
         isRetruth: !!(raw.reblog),
-        reblogAuthor: raw.reblog ? (raw.reblog.account ? raw.reblog.account.display_name || raw.reblog.account.username : null) : null,
+        reblogAuthor: raw.reblog?.account ? (raw.reblog.account.display_name || raw.reblog.account.username) : null,
         reblogText: raw.reblog ? this.stripHtml(raw.reblog.content || '') : null,
         mediaUrls: (raw.media_attachments || []).map(m => m.url).filter(Boolean),
         repliesCount: raw.replies_count || 0,
         reblogsCount: raw.reblogs_count || 0,
         favouritesCount: raw.favourites_count || 0
-      };
-
-      newPosts.push(post);
+      });
     }
-
-    // Update posts list (keep latest 20)
     if (newPosts.length > 0) {
       this.posts = [...newPosts, ...this.posts]
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 20);
-
-      // Remove very old IDs from seenIds to prevent unbounded growth
-      if (this.seenIds.size > 200) {
-        const keepIds = new Set(this.posts.map(p => p.id));
-        this.seenIds = keepIds;
-      }
-
+      if (this.seenIds.size > 200) this.seenIds = new Set(this.posts.map(p => p.id));
+      this.postsFetched += newPosts.length;
       this.log(`${newPosts.length} new post(s) fetched`);
       this.onNewPost(newPosts, this.posts);
     }
@@ -128,21 +122,32 @@ class TruthScraper {
 
   stripHtml(html) {
     return html
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>\s*<p>/gi, '\n\n')
+      .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n')
       .replace(/<a[^>]*href="([^"]*)"[^>]*>[^<]*<\/a>/gi, '$1')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  getPosts() {
-    return this.posts;
+  getPosts() { return this.posts; }
+
+  getStatus() {
+    return {
+      source: 'Truth Social',
+      sourceKey: 'truth',
+      sourceUrl: 'https://truthsocial.com/@realDonaldTrump',
+      status: this.status,
+      message: this.statusMessage,
+      lastSuccessAt: this.lastSuccessAt,
+      lastErrorAt: this.lastErrorAt,
+      lastErrorMessage: this.lastErrorMessage,
+      postsFetched: this.postsFetched,
+      pollCount: this.pollCount,
+      errorCount: this.errorCount,
+      latestItems: this.posts.slice(0, 5).map(p => ({
+        title: p.text.substring(0, 100), url: p.url, timestamp: p.createdAt
+      }))
+    };
   }
 }
 

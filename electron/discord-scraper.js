@@ -46,6 +46,10 @@ class DiscordScraper {
     this.messagesReceived = 0;
     this.itemsIngested = 0;
     this.lastMessageAt = null;
+    this.lastSuccessAt = null;
+    this.lastErrorAt = null;
+    this.lastErrorMessage = '';
+    this.errorCount = 0;
 
     this.client = new Client({
       intents: [
@@ -58,6 +62,7 @@ class DiscordScraper {
     this.client.on('ready', () => {
       this.status = 'connected';
       this.statusMessage = `Connected as ${this.client.user.tag}`;
+      this.lastSuccessAt = new Date().toISOString();
       log(`Discord bot connected as ${this.client.user.tag}`);
       log(`Bot ID: ${this.client.user.id}`);
       log(`Monitoring ${CHANNEL_IDS.size} channels: ${[...CHANNEL_IDS].join(', ')}`);
@@ -78,6 +83,7 @@ class DiscordScraper {
       log(`MSG from #${message.channel.name || message.channel.id} by ${message.author.username}: ${message.content.substring(0, 80)}`);
       this.messagesReceived++;
       this.lastMessageAt = new Date().toISOString();
+      this.lastSuccessAt = new Date().toISOString();
 
       if (!CHANNEL_IDS.has(message.channel.id)) {
         log(`  -> Ignored (channel not monitored)`);
@@ -108,6 +114,9 @@ class DiscordScraper {
     this.client.on('disconnect', () => {
       this.status = 'disconnected';
       this.statusMessage = 'Disconnected from Discord';
+      this.lastErrorAt = new Date().toISOString();
+      this.lastErrorMessage = 'Disconnected from Discord';
+      this.errorCount++;
       log('Discord disconnected');
     });
 
@@ -120,6 +129,9 @@ class DiscordScraper {
     this.client.on('error', (err) => {
       this.status = 'error';
       this.statusMessage = `Error: ${err.message}`;
+      this.lastErrorAt = new Date().toISOString();
+      this.lastErrorMessage = err.message;
+      this.errorCount++;
       log(`Discord error: ${err.message}`);
     });
 
@@ -127,6 +139,9 @@ class DiscordScraper {
     this.client.login(this.token).catch(err => {
       this.status = 'failed';
       this.statusMessage = `Login failed: ${err.message}`;
+      this.lastErrorAt = new Date().toISOString();
+      this.lastErrorMessage = `Login failed: ${err.message}`;
+      this.errorCount++;
       log(`Discord login failed: ${err.message}`);
     });
   }
@@ -140,11 +155,19 @@ class DiscordScraper {
 
   getStatus() {
     return {
+      source: 'Discord News Bot',
+      sourceKey: 'discord',
+      sourceUrl: 'https://discord.com',
       status: this.status || 'not started',
       message: this.statusMessage || '',
       messagesReceived: this.messagesReceived || 0,
       itemsIngested: this.itemsIngested || 0,
       lastMessageAt: this.lastMessageAt,
+      lastSuccessAt: this.lastSuccessAt,
+      lastErrorAt: this.lastErrorAt,
+      lastErrorMessage: this.lastErrorMessage || '',
+      errorCount: this.errorCount || 0,
+      latestItems: [],
       channels: [...CHANNEL_IDS],
       botUser: this.client?.user ? { tag: this.client.user.tag, id: this.client.user.id } : null
     };

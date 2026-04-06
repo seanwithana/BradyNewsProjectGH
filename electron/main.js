@@ -1,6 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const Database = require('./database');
@@ -12,6 +12,9 @@ const { fetchAllUrls } = require('./content-fetcher');
 const DiscordScraper = require('./discord-scraper');
 const finvizScraper = require('./finviz-scraper');
 const TruthScraper = require('./truth-scraper');
+const WebScraper = require('./web-scraper');
+const PuppeteerScraper = require('./puppeteer-scraper');
+const SCRAPER_SOURCES = require('./scraper-sources');
 
 let mainWindow;
 let database;
@@ -20,6 +23,8 @@ let llmProcessor;
 let apiLlmProcessor;
 let discordScraper;
 let truthScraper;
+let webScrapers = [];
+let puppeteerScrapers = [];
 
 function emit(event, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -38,7 +43,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      webSecurity: false
     }
   });
 
@@ -159,7 +165,187 @@ async function initializeBackend() {
       }
     }
   });
-  truthScraper.start();
+  // Truth Social scraper disabled — Cloudflare bypass requires headless browser
+  // which causes resource contention with the Discord bot.
+  // truthScraper.start();
+
+  // Web scrapers — all sources from scraper-sources.js
+  for (const config of SCRAPER_SOURCES) {
+    const scraper = new WebScraper(config);
+    scraper.onNewItems = (items, sourceKey, sourceName) => {
+      for (const item of items) {
+        const newsSourceKey = `web_${sourceKey}_${item.id}`.substring(0, 250);
+        const newsItem = {
+          source_type: sourceKey,
+          source_key: newsSourceKey,
+          ticker_symbol: null,
+          text: item.title + (item.text && item.text !== item.title ? '\n' + item.text : ''),
+          country_iso2: null,
+          market_cap_raw: null,
+          market_cap_value: null,
+          urls_json: JSON.stringify(item.url ? [item.url] : []),
+          source_channels_json: '[]',
+          source_message_ids_json: JSON.stringify([item.id]),
+          original_timestamp: item.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19)
+        };
+        const result = database.insertNewsItem(newsItem);
+        if (result.changes > 0) {
+          const inserted = database.getNewsItemBySourceKey(newsSourceKey);
+          if (inserted) {
+            processNewItem(inserted, sourceKey);
+          }
+        }
+      }
+    };
+    webScrapers.push(scraper);
+    scraper.start();
+  }
+
+  // Puppeteer-based scrapers for SPA sites
+  function setupPuppeteerScraper(config) {
+    const scraper = new PuppeteerScraper(config);
+    scraper.onNewItems = (items, sourceKey, sourceName) => {
+      for (const item of items) {
+        const newsSourceKey = `pup_${sourceKey}_${item.id}`.substring(0, 250);
+        const newsItem = {
+          source_type: sourceKey,
+          source_key: newsSourceKey,
+          ticker_symbol: null,
+          text: item.title + (item.text && item.text !== item.title ? '\n' + item.text : ''),
+          country_iso2: null,
+          market_cap_raw: null,
+          market_cap_value: null,
+          urls_json: JSON.stringify(item.url ? [item.url] : []),
+          source_channels_json: '[]',
+          source_message_ids_json: JSON.stringify([item.id || item.url]),
+          original_timestamp: item.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19)
+        };
+        const result = database.insertNewsItem(newsItem);
+        if (result.changes > 0) {
+          const inserted = database.getNewsItemBySourceKey(newsSourceKey);
+          if (inserted) processNewItem(inserted, sourceKey);
+        }
+      }
+    };
+    puppeteerScrapers.push(scraper);
+    scraper.start();
+  }
+
+  // EPA News Releases (SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'EPA News Releases',
+    key: 'epa',
+    sourceUrl: 'https://www.epa.gov/newsreleases/search',
+    workerPath: path.join(__dirname, 'epa-worker.js'),
+    parseArticleFn: (html) => {
+      const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+      if (article) return article[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      return '';
+    }
+  });
+
+  // FAA Press Releases (SPA — requires puppeteer for both listing and articles)
+  setupPuppeteerScraper({
+    name: 'FAA Press Releases',
+    key: 'faa',
+    sourceUrl: 'https://www.faa.gov/newsroom/press_releases',
+    workerPath: path.join(__dirname, 'faa-worker.js'),
+    parseArticleFn: null
+  });
+
+  // SEC Press Releases (403 blocked — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'SEC Press Releases',
+    key: 'sec',
+    sourceUrl: 'https://www.sec.gov/newsroom/press-releases',
+    workerPath: path.join(__dirname, 'sec-worker.js'),
+    parseArticleFn: (html) => {
+      const body = html.match(/class="[^"]*field--name-body[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i);
+      if (body) return body[1].replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      return '';
+    }
+  });
+
+  // DOJ Press Releases (bot challenge — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'DOJ Press Releases',
+    key: 'doj',
+    sourceUrl: 'https://www.justice.gov/news/press-releases?search_api_fulltext=+&start_date=&end_date=&sort_by=field_date',
+    workerPath: path.join(__dirname, 'doj-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Viceroy Research (SPA with disclaimer modal — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'Viceroy Research',
+    key: 'viceroy',
+    sourceUrl: 'https://viceroyresearch.org/',
+    workerPath: path.join(__dirname, 'viceroy-worker.js'),
+    parseArticleFn: null
+  });
+
+  // NHTSA Press Releases (403 blocked — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'NHTSA Press Releases',
+    key: 'nhtsa',
+    sourceUrl: 'https://www.nhtsa.gov/press-releases',
+    workerPath: path.join(__dirname, 'nhtsa-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Bonitas Research (WordPress SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'Bonitas Research',
+    key: 'bonitas',
+    sourceUrl: 'https://www.bonitasresearch.com/research/',
+    workerPath: path.join(__dirname, 'bonitas-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Kerrisdale Capital (403 blocked — puppeteer for titles)
+  setupPuppeteerScraper({
+    name: 'Kerrisdale Capital',
+    key: 'kerrisdale',
+    sourceUrl: 'https://www.kerrisdalecap.com/blog',
+    workerPath: path.join(__dirname, 'kerrisdale-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Gotham City Research (Wix SPA — RSS for listing, puppeteer for articles)
+  setupPuppeteerScraper({
+    name: 'Gotham City Research',
+    key: 'gothamcity',
+    sourceUrl: 'https://www.gothamcityresearch.com/',
+    workerPath: path.join(__dirname, 'gotham-worker.js'),
+    parseArticleFn: null
+  });
+
+  // Wolfpack Research (Wix SPA — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'Wolfpack Research',
+    key: 'wolfpack',
+    sourceUrl: 'https://www.wolfpackresearch.com/items',
+    workerPath: path.join(__dirname, 'wolfpack-worker.js'),
+    parseArticleFn: null
+  });
+
+  // USDA Press Releases (too slow for direct HTTP — requires puppeteer)
+  setupPuppeteerScraper({
+    name: 'USDA Press Releases',
+    key: 'usda',
+    sourceUrl: 'https://www.usda.gov/about-usda/news/press-releases',
+    workerPath: path.join(__dirname, 'usda-worker.js'),
+    parseArticleFn: null
+  });
+
+  // BLS Releases (CPI, Employment, PPI — 403 blocked, single-page releases)
+  setupPuppeteerScraper({
+    name: 'BLS Economic Releases',
+    key: 'bls',
+    sourceUrl: 'https://www.bls.gov/news.release/cpi.htm',
+    workerPath: path.join(__dirname, 'bls-worker.js'),
+    parseArticleFn: null
+  });
 }
 
 // ── IPC Handlers ──
@@ -186,6 +372,114 @@ ipcMain.handle('search-news', (_, query) => {
 // Truth Social
 ipcMain.handle('get-truth-posts', () => {
   return truthScraper ? truthScraper.getPosts() : [];
+});
+
+// Open URL in system browser
+ipcMain.handle('open-external', (_, url) => {
+  if (url && url.startsWith('http')) shell.openExternal(url);
+});
+
+// Test fetcher — runs entirely in a spawned node child process
+ipcMain.handle('test-browser-fetch', (_, url) => {
+  return new Promise((resolve) => {
+    const { execFile } = require('child_process');
+    const script = `
+      const https = require('https');
+      const http = require('http');
+      function doFetch(url, depth) {
+        return new Promise((resolve, reject) => {
+          if (depth > 3) return reject(new Error('Too many redirects'));
+          const client = url.startsWith('https') ? https : http;
+          const req = client.get(url, { timeout: 15000, headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': 'identity',
+            'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'none', 'Sec-Fetch-User': '?1'
+          }}, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              res.resume(); let loc = res.headers.location;
+              if (loc.startsWith('/')) loc = new URL(loc, url).href;
+              return doFetch(loc, depth+1).then(resolve).catch(reject);
+            }
+            if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP '+res.statusCode)); }
+            let d=''; res.on('data',c=>d+=c); res.on('end',()=>resolve(d));
+          });
+          req.on('error', reject);
+          req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+        });
+      }
+      doFetch(process.argv[1], 0).then(html => {
+        const strats = [
+          ['field--name-body', /class="[^"]*field--name-body[^"]*"[^>]*>([\\s\\S]*?)<\\/div>\\s*<\\/div>/i],
+          ['article-body', /class="[^"]*article[_-]?body[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/i],
+          ['article tag', /<article[^>]*>([\\s\\S]*?)<\\/article>/i],
+          ['main tag', /<main[^>]*>([\\s\\S]*?)<\\/main>/i],
+        ];
+        const r = {};
+        for (const [name, regex] of strats) {
+          const m = html.match(regex);
+          if (m) {
+            const t = m[1].replace(/<script[\\s\\S]*?<\\/script>/gi,'').replace(/<style[\\s\\S]*?<\\/style>/gi,'').replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim();
+            r[name] = { length: t.length, preview: t.substring(0,500) };
+          }
+        }
+        process.stdout.write(JSON.stringify({ ok: true, rawLength: html.length, strategies: r }));
+      }).catch(e => {
+        process.stdout.write(JSON.stringify({ ok: false, error: e.message }));
+      });
+    `;
+    execFile('node', ['-e', script, url], { timeout: 20000 }, (err, stdout) => {
+      if (err) return resolve({ ok: false, error: err.message });
+      try { resolve(JSON.parse(stdout)); } catch { resolve({ ok: false, error: 'Parse error: ' + stdout.substring(0, 200) }); }
+    });
+  });
+});
+
+// Set scraper polling interval
+ipcMain.handle('set-scraper-interval', (_, { sourceKey, intervalMs }) => {
+  const scraper = webScrapers.find(s => s.key === sourceKey);
+  if (scraper) {
+    scraper.setPollingInterval(intervalMs);
+    return true;
+  }
+  return false;
+});
+
+// Available sources list
+ipcMain.handle('get-available-sources', () => {
+  const sources = [
+    { key: 'discord', name: 'Discord News Bot' },
+    { key: 'truth', name: 'Trump Truth Social' },
+  ];
+  for (const config of SCRAPER_SOURCES) {
+    sources.push({ key: config.key, name: config.name });
+  }
+  return sources;
+});
+
+// Scraper Health
+ipcMain.handle('get-scraper-health', () => {
+  const scrapers = [];
+  if (discordScraper) {
+    scrapers.push(discordScraper.getStatus());
+  } else {
+    scrapers.push({
+      source: 'Discord News Bot', sourceKey: 'discord', sourceUrl: 'https://discord.com',
+      status: 'disabled', message: 'No bot token configured',
+      lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: '', errorCount: 0,
+      latestItems: []
+    });
+  }
+  if (truthScraper) {
+    scrapers.push(truthScraper.getStatus());
+  }
+  for (const ws of webScrapers) {
+    scrapers.push(ws.getStatus());
+  }
+  for (const ps of puppeteerScrapers) {
+    scrapers.push(ps.getStatus());
+  }
+  return scrapers;
 });
 
 // Rulesets
@@ -347,7 +641,9 @@ ipcMain.handle('get-stats', () => {
 });
 
 app.whenReady().then(async () => {
+  createWindow();
   await initializeBackend();
+
 
   // Startup reprocess
   const rulesets = database.getRulesets().filter(rs => rs.enabled);
@@ -355,7 +651,6 @@ app.whenReady().then(async () => {
     keywordEngine.reprocess(rs.id, '1d');
   }
 
-  createWindow();
 });
 
 app.on('window-all-closed', () => {

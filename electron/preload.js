@@ -51,6 +51,17 @@ contextBridge.exposeInMainWorld('api', {
   // Truth Social
   getTruthPosts: () => ipcRenderer.invoke('get-truth-posts'),
 
+  // System browser
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // Test browser fetcher
+  testBrowserFetch: (url) => ipcRenderer.invoke('test-browser-fetch', url),
+
+  // Scraper Health
+  getScraperHealth: () => ipcRenderer.invoke('get-scraper-health'),
+  getAvailableSources: () => ipcRenderer.invoke('get-available-sources'),
+  setScraperInterval: (sourceKey, intervalMs) => ipcRenderer.invoke('set-scraper-interval', { sourceKey, intervalMs }),
+
   // Events
   onNewsFeedUpdate: (callback) => {
     ipcRenderer.on('news-feed-update', (_, data) => callback(data));

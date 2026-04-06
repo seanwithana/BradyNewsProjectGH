@@ -19,6 +19,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'llm-analysis') { populateLLMRulesetFilter(); refreshLLMQueue(); }
     if (btn.dataset.tab === 'api-testing') refreshApiTestingItems();
     if (btn.dataset.tab === 'truth-feed') refreshTruthFeed();
+    if (btn.dataset.tab === 'scraper-health') refreshScraperHealth();
   });
 });
 
@@ -95,81 +96,67 @@ function renderFeedItems(items) {
     return;
   }
 
-  preserveScroll(list, () => { list.innerHTML = items.map(item => {
+  const cardHtmls = [];
+  const cardIds = [];
+
+  for (const item of items) {
     const matchedKeywords = safeParseJSON(item.matched_keywords, []);
     let text = escapeHtml(item.text);
 
-    // Extract metadata fields from message text for the title section
     let extractedMC = item.market_cap_raw || '';
     let extractedFloat = item.float_raw || '';
     let extractedIO = '';
     let extractedCountry = item.country_iso2 || '';
 
-    // Extract **MC**: value (bold markdown format, e.g. **MC**: 6.2 M)
     const mcBoldMatch = text.match(/\*\*MC\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
     if (mcBoldMatch) { if (!extractedMC) extractedMC = mcBoldMatch[1].trim(); }
-    // Extract backtick-wrapped market cap (e.g. `10.1 M`)
     const mcBacktickMatch = text.match(/`\s*([\d,.]+\s*[KMBkmb])\s*`/);
     if (mcBacktickMatch) { if (!extractedMC) extractedMC = mcBacktickMatch[1].trim(); }
 
-    // Extract **Float**: value (only if not already from DB)
     if (!extractedFloat) {
       const floatMatch = text.match(/\*\*Float\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
       if (floatMatch) extractedFloat = floatMatch[1].trim();
     }
 
-    // Extract **IO**: value
     const ioMatch = text.match(/\*\*IO\*\*:\s*([\d,.]+\s*%?)/i);
     if (ioMatch) extractedIO = ioMatch[1].trim();
 
-    // Remove these metadata fields and their surrounding pipe separators from text
-    // Remove **MC**: value, **Float**: value, **IO**: value (with optional surrounding pipes/whitespace)
     text = text.replace(/\s*\|\s*\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
     text = text.replace(/\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
     text = text.replace(/\s*\|\s*\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
     text = text.replace(/\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
     text = text.replace(/\s*\|\s*\*\*IO\*\*:\s*[\d,.]+\s*%?/gi, '');
     text = text.replace(/\*\*IO\*\*:\s*[\d,.]+\s*%?\s*\|?\s*/gi, '');
-    // Remove backtick-wrapped market cap (e.g. `10.1 M`)
     text = text.replace(/\s*`\s*[\d,.]+\s*[KMBkmb]\s*`/g, '');
-    // Remove standalone MC: format too
     text = text.replace(/\s*\bMC:\s*[\d,.]+\s*[KMBkmb]\b/gi, '');
 
-    // Extract country: :flag_xx: format
     if (!extractedCountry) {
       const countryMatch = text.match(/:flag_([a-z]{2}):/i);
       if (countryMatch) extractedCountry = countryMatch[1].toUpperCase();
     }
-    // Remove :flag_xx: country markers from the message text
     text = text.replace(/\s*:flag_[a-z]{2}:\s*/gi, ' ');
-    // Remove Unicode flag emojis (regional indicator pairs) and surrounding pipes/tilde
     text = text.replace(/\s*[\u{1F1E0}-\u{1F1FF}]{2}\s*/gu, ' ');
-    // Clean up leftover tilde separator (e.g. "~ |" or standalone "~")
     text = text.replace(/\s*~\s*\|?\s*/g, ' ');
-    // Remove empty bold blocks (** **) and trim
     text = text.replace(/\*\*\s*\*\*/g, '').trim();
-    // Remove backtick-wrapped time at the beginning (e.g. `08:30` or `14:15`)
     text = text.replace(/^\s*`\d{1,2}:\d{2}`\s*/, '');
-    // Remove arrow indicators (↑ ↓) at the beginning
     text = text.replace(/^\s*[↑↓]\s*/, '');
 
-    // Highlight matched keywords
     for (const kw of matchedKeywords) {
       const escaped = escapeRegex(kw);
       const regex = new RegExp(`(${escaped})`, 'gi');
       text = text.replace(regex, '<span class="keyword-highlight">$1</span>');
     }
 
-    // Parse Discord-style formatting
     text = formatDiscordText(text);
 
     const urls = safeParseJSON(item.urls_json, []);
     const borderColor = item.color || item.ruleset_color || '#6c63ff';
-
     const receivedTime = formatTimeHMS(item.received_at || item.original_timestamp);
+    const cardId = 'feed_' + item.news_item_id + '_' + item.ruleset_id;
 
-    return `
-      <div class="news-card" data-news-item-id="${item.news_item_id}" style="border-left-color: ${borderColor}">
+    cardIds.push(cardId);
+    cardHtmls.push(`
+      <div class="news-card" data-card-id="${cardId}" data-news-item-id="${item.news_item_id}" style="border-left-color: ${borderColor}">
         <div class="news-card-header">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <span class="news-card-time">${receivedTime}</span>
@@ -201,8 +188,10 @@ function renderFeedItems(items) {
             ${item.llm_completed_at ? `<span>AI Done: ${formatTimestamp(item.llm_completed_at)}</span>` : ''}
           </div>
         </div>
-      </div>`;
-  }).join(''); });
+      </div>`);
+  }
+
+  incrementalUpdate(list, cardHtmls, cardIds);
 
   // Enqueue finviz lookups for items missing cap or float
   const finvizRequests = items
@@ -308,6 +297,9 @@ function formatDiscordText(text) {
   // Blockquote: > text (with optional bullet *)
   text = text.replace(/^&gt; \* (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#ffffff;margin:2px 0">• $1</div>');
   text = text.replace(/^&gt; (.+)$/gm, '<div style="border-left:3px solid #5865f2;padding-left:8px;color:#ffffff;margin:2px 0">$1</div>');
+
+  // Auto-link plain URLs that aren't already inside <a> tags
+  text = text.replace(/(^|[^"'>])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" style="color:#00aff4;text-decoration:none">$2</a>');
 
   return text;
 }
@@ -437,15 +429,19 @@ function renderTruthPosts(posts) {
     return;
   }
 
-  list.innerHTML = posts.slice(0, 10).map(post => {
+  const truthCardHtmls = [];
+  const truthCardIds = [];
+
+  for (const post of posts.slice(0, 10)) {
     const time = formatTimeHMS(post.createdAt);
     const fullTime = formatTimestamp(post.createdAt);
     let text = escapeHtml(post.isRetruth && post.reblogText ? post.reblogText : post.text);
     text = text.replace(/\n/g, '<br>');
     const rtTag = post.isRetruth ? `<span class="truth-rt-badge">RT${post.reblogAuthor ? ' @' + escapeHtml(post.reblogAuthor) : ''}</span>` : '';
 
-    return `
-      <div class="news-card truth-card" style="border-left-color: #6be1ff">
+    truthCardIds.push('truth_' + post.id);
+    truthCardHtmls.push(`
+      <div class="news-card truth-card" data-card-id="truth_${post.id}" style="border-left-color: #6be1ff">
         <div class="news-card-header">
           <div style="display:flex;gap:6px;align-items:center">
             <span class="news-card-time">${time}</span>
@@ -461,8 +457,10 @@ function renderTruthPosts(posts) {
             <span>Posted: ${fullTime}</span>
           </div>
         </div>
-      </div>`;
-  }).join('');
+      </div>`);
+  }
+
+  incrementalUpdate(list, truthCardHtmls, truthCardIds);
 }
 
 // Listen for live Truth Social updates
@@ -472,7 +470,240 @@ window.api.onTruthUpdate((data) => {
   }
 });
 
+// ── Browser Fetch Test ──
+document.getElementById('browser-fetch-test-btn').addEventListener('click', async () => {
+  const url = document.getElementById('browser-fetch-test-url').value.trim();
+  if (!url) return;
+  const resultEl = document.getElementById('browser-fetch-result');
+  resultEl.style.display = 'block';
+  resultEl.textContent = 'Fetching via browser fetcher...';
+  try {
+    const result = await window.api.testBrowserFetch(url);
+    if (result.ok) {
+      let output = `SUCCESS (${result.rawLength} chars raw HTML)\n\n`;
+      if (Object.keys(result.strategies).length === 0) {
+        output += 'No content selectors matched. The page may use a different structure.';
+      } else {
+        for (const [name, data] of Object.entries(result.strategies)) {
+          output += `=== ${name} (${data.length} chars) ===\n${data.preview}\n\n`;
+        }
+      }
+      resultEl.textContent = output;
+    } else {
+      resultEl.textContent = `ERROR: ${result.error}`;
+    }
+  } catch (e) {
+    resultEl.textContent = `ERROR: ${e.message}`;
+  }
+});
+
+// ── Scraper Health Tab ──
+
+let scraperHealthSort = 'lastErrorAt'; // default sort by most recent errors
+
+async function refreshScraperHealth() {
+  const scrapers = await window.api.getScraperHealth();
+
+  scrapers.sort((a, b) => {
+    if (scraperHealthSort === 'lastErrorAt') {
+      const aErr = a.lastErrorAt || '';
+      const bErr = b.lastErrorAt || '';
+      return bErr.localeCompare(aErr);
+    }
+    return 0;
+  });
+
+  const container = document.getElementById('scraper-health-table');
+  const isErroring = (s) => ['error', 'failed', 'disconnected'].includes(s.status);
+
+  const latestEntry = (s) => {
+    if (!s.latestItems || s.latestItems.length === 0) return '<span style="color:var(--text-muted)">—</span>';
+    const item = s.latestItems[0];
+    const title = escapeHtml((item.title || '').substring(0, 80));
+    if (item.url) return `<a href="${escapeHtml(item.url)}" target="_blank" class="health-latest-link">${title}</a>`;
+    return `<span class="health-latest-text">${title}</span>`;
+  };
+
+  const tbody = container.querySelector('tbody');
+  if (!tbody || tbody.children.length !== scrapers.length) {
+    // First render or row count changed — full rebuild
+    updateIfChanged(container, `
+      <table class="health-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Source</th>
+            <th>Poll (s)</th>
+            <th>Status</th>
+            <th>Newest Entry</th>
+            <th>Last Success</th>
+            <th class="sortable ${scraperHealthSort === 'lastErrorAt' ? 'sorted' : ''}" data-sort="lastErrorAt">Last Error ▼</th>
+            <th>Last Error Message</th>
+            <th>Errors</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${scrapers.map(s => buildHealthRow(s, isErroring, latestEntry)).join('')}
+        </tbody>
+      </table>
+    `);
+    wireIntervalInputs(container);
+    return;
+  }
+
+  // In-place cell updates — no DOM rebuild, no flicker
+  const rows = tbody.children;
+  for (let i = 0; i < scrapers.length; i++) {
+    const s = scrapers[i];
+    const cells = rows[i].children;
+    const dotClass = isErroring(s) ? 'red' : 'green';
+    const dot = cells[0].querySelector('.health-dot');
+    if (dot && !dot.classList.contains(dotClass)) {
+      dot.className = 'health-dot ' + dotClass;
+    }
+    // Skip cell 1 (source name) and cell 2 (interval input) — don't overwrite user focus
+    updateCell(cells[3], escapeHtml(s.status));
+    updateCell(cells[4], latestEntry(s));
+    updateCell(cells[5], s.lastSuccessAt ? formatTimestamp(s.lastSuccessAt) : '<span style="color:var(--text-muted)">Never</span>');
+    updateCell(cells[6], s.lastErrorAt ? formatTimestamp(s.lastErrorAt) : '<span style="color:var(--text-muted)">Never</span>');
+    updateCell(cells[7], s.lastErrorMessage ? escapeHtml(s.lastErrorMessage) : '<span style="color:var(--text-muted)">—</span>');
+    updateCell(cells[8], String(s.errorCount || 0));
+  }
+}
+
+function buildHealthRow(s, isErroring, latestEntry) {
+  const intervalSec = s.intervalMs ? Math.round(s.intervalMs / 1000) : '';
+  return `<tr>
+    <td><span class="health-dot ${isErroring(s) ? 'red' : 'green'}"></span></td>
+    <td class="health-source"><a href="#" onclick="event.preventDefault();window.api.openExternal('${escapeHtml(s.sourceUrl || '')}')">${escapeHtml(s.source)}</a></td>
+    <td><input type="number" class="health-interval-input" data-source-key="${escapeHtml(s.sourceKey)}" value="${intervalSec}" min="1" max="3600" style="width:50px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);padding:2px 4px;font-size:11px;text-align:center" /></td>
+    <td class="health-status">${escapeHtml(s.status)}</td>
+    <td class="health-latest">${latestEntry(s)}</td>
+    <td>${s.lastSuccessAt ? formatTimestamp(s.lastSuccessAt) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+    <td>${s.lastErrorAt ? formatTimestamp(s.lastErrorAt) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+    <td class="health-error-msg">${s.lastErrorMessage ? escapeHtml(s.lastErrorMessage) : '<span style="color:var(--text-muted)">—</span>'}</td>
+    <td>${s.errorCount || 0}</td>
+  </tr>`;
+}
+
+function wireIntervalInputs(container) {
+  container.querySelectorAll('.health-interval-input').forEach(input => {
+    input.addEventListener('change', () => {
+      const key = input.dataset.sourceKey;
+      const sec = parseInt(input.value);
+      if (key && sec >= 1) {
+        window.api.setScraperInterval(key, sec * 1000);
+      }
+    });
+  });
+}
+
+function updateCell(td, newHtml) {
+  if (td.innerHTML !== newHtml) td.innerHTML = newHtml;
+}
+
+// Auto-refresh scraper health every 5 seconds when tab is active
+setInterval(() => {
+  if (document.querySelector('.tab-btn[data-tab="scraper-health"]').classList.contains('active')) {
+    refreshScraperHealth();
+  }
+}, 5000);
+
 // ── All News Tab ──
+
+let allNewsItems = [];      // full item list from last fetch
+let allNewsRendered = 0;    // how many cards currently rendered
+const ALL_NEWS_INITIAL = 50;
+const ALL_NEWS_PAGE = 30;
+
+function buildAllNewsCard(item) {
+  let text = escapeHtml(item.text);
+  let extractedMC = item.market_cap_raw || '';
+  let extractedFloat = '';
+  let extractedIO = '';
+  let extractedCountry = item.country_iso2 || '';
+
+  const mcBoldMatch = text.match(/\*\*MC\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+  if (mcBoldMatch && !extractedMC) extractedMC = mcBoldMatch[1].trim();
+  const mcBacktickMatch = text.match(/`\s*([\d,.]+\s*[KMBkmb])\s*`/);
+  if (mcBacktickMatch && !extractedMC) extractedMC = mcBacktickMatch[1].trim();
+  const floatMatch = text.match(/\*\*Float\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
+  if (floatMatch) extractedFloat = floatMatch[1].trim();
+  const ioMatch = text.match(/\*\*IO\*\*:\s*([\d,.]+\s*%?)/i);
+  if (ioMatch) extractedIO = ioMatch[1].trim();
+
+  text = text.replace(/\s*\|\s*\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+  text = text.replace(/\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+  text = text.replace(/\s*\|\s*\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
+  text = text.replace(/\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
+  text = text.replace(/\s*\|\s*\*\*IO\*\*:\s*[\d,.]+\s*%?/gi, '');
+  text = text.replace(/\*\*IO\*\*:\s*[\d,.]+\s*%?\s*\|?\s*/gi, '');
+  text = text.replace(/\s*`\s*[\d,.]+\s*[KMBkmb]\s*`/g, '');
+  text = text.replace(/\s*\bMC:\s*[\d,.]+\s*[KMBkmb]\b/gi, '');
+  if (!extractedCountry) {
+    const cm = text.match(/:flag_([a-z]{2}):/i);
+    if (cm) extractedCountry = cm[1].toUpperCase();
+  }
+  text = text.replace(/\s*:flag_[a-z]{2}:\s*/gi, ' ');
+  text = text.replace(/\s*[\u{1F1E0}-\u{1F1FF}]{2}\s*/gu, ' ');
+  text = text.replace(/\s*~\s*\|?\s*/g, ' ');
+  text = text.replace(/\*\*\s*\*\*/g, '').trim();
+  text = text.replace(/^\s*`\d{1,2}:\d{2}`\s*/, '');
+  text = text.replace(/^\s*[↑↓]\s*/, '');
+  text = formatDiscordText(text);
+
+  const urls = safeParseJSON(item.urls_json, []);
+  const receivedTime = formatTimeHMS(item.original_timestamp);
+
+  return `
+    <div class="news-card" data-card-id="allnews_${item.id}" style="border-left-color: var(--accent)">
+      <div class="news-card-header">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="news-card-time">${receivedTime}</span>
+          ${extractedMC ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedMC)}">Cap: ${escapeHtml(extractedMC)}</span>` : ''}
+          ${extractedFloat ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedFloat)}">Float: ${escapeHtml(extractedFloat)}</span>` : ''}
+          ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
+          ${extractedCountry ? `<span class="country-badge">${escapeHtml(extractedCountry)}</span>` : ''}
+        </div>
+        <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
+      </div>
+      <div class="news-card-body" style="color:#ffffff">${text}</div>
+      ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
+      <div class="news-card-footer">
+        <button class="timestamps-toggle" onclick="this.parentElement.querySelector('.news-card-timestamps').classList.toggle('show');this.classList.toggle('open')">▶ times</button>
+        <button class="btn btn-small btn-primary send-to-api-btn" data-item-id="${item.id}">Send to API Testing</button>
+        <div class="news-card-timestamps">
+          <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
+          <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function wireAllNewsButtons(container) {
+  container.querySelectorAll('.send-to-api-btn:not([data-wired])').forEach(btn => {
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const itemId = parseInt(btn.dataset.itemId);
+      const item = allNewsItems.find(i => i.id === itemId);
+      if (item) sendNewsItemToApiTesting(item);
+    });
+  });
+}
+
+function renderAllNewsPage(list, startIdx, count) {
+  const end = Math.min(startIdx + count, allNewsItems.length);
+  const frag = document.createDocumentFragment();
+  for (let i = startIdx; i < end; i++) {
+    const temp = document.createElement('div');
+    temp.innerHTML = buildAllNewsCard(allNewsItems[i]);
+    frag.appendChild(temp.firstElementChild);
+  }
+  list.appendChild(frag);
+  wireAllNewsButtons(list);
+  allNewsRendered = end;
+}
 
 async function refreshAllNews() {
   const filters = {};
@@ -491,104 +722,62 @@ async function refreshAllNews() {
 
   if (!items || items.length === 0) {
     list.innerHTML = `<div class="empty-state"><div>No news items collected yet</div><div style="font-size:12px">Waiting for Discord scraper to receive messages...</div></div>`;
+    allNewsItems = [];
+    allNewsRendered = 0;
     return;
   }
 
-  preserveScroll(list, () => {
-    list.innerHTML = items.map(item => {
-      let text = escapeHtml(item.text);
+  // Check for new items at the top
+  const existingIds = new Set();
+  for (const child of list.children) {
+    const cid = child.dataset.cardId;
+    if (cid) existingIds.add(cid);
+  }
 
-      // Extract metadata fields from message text for the title section
-      let extractedMC = item.market_cap_raw || '';
-      let extractedFloat = '';
-      let extractedIO = '';
-      let extractedCountry = item.country_iso2 || '';
+  // Find new items not yet rendered
+  const newAtTop = [];
+  for (const item of items) {
+    const cardId = 'allnews_' + item.id;
+    if (existingIds.has(cardId)) break; // stop at first existing item
+    newAtTop.push(item);
+  }
 
-      // Extract **MC**: value (bold markdown format)
-      const mcBoldMatch = text.match(/\*\*MC\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
-      if (mcBoldMatch) { if (!extractedMC) extractedMC = mcBoldMatch[1].trim(); }
-      // Extract backtick-wrapped market cap (e.g. `10.1 M`)
-      const mcBacktickMatch = text.match(/`\s*([\d,.]+\s*[KMBkmb])\s*`/);
-      if (mcBacktickMatch) { if (!extractedMC) extractedMC = mcBacktickMatch[1].trim(); }
+  allNewsItems = items;
 
-      // Extract **Float**: value
-      const floatMatch = text.match(/\*\*Float\*\*:\s*([\d,.]+\s*[KMBkmb%]?)/i);
-      if (floatMatch) extractedFloat = floatMatch[1].trim();
-
-      // Extract **IO**: value
-      const ioMatch = text.match(/\*\*IO\*\*:\s*([\d,.]+\s*%?)/i);
-      if (ioMatch) extractedIO = ioMatch[1].trim();
-
-      // Remove these metadata fields and their surrounding pipe separators from text
-      text = text.replace(/\s*\|\s*\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
-      text = text.replace(/\*\*MC\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
-      text = text.replace(/\s*\|\s*\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?/gi, '');
-      text = text.replace(/\*\*Float\*\*:\s*[\d,.]+\s*[KMBkmb%]?\s*\|?\s*/gi, '');
-      text = text.replace(/\s*\|\s*\*\*IO\*\*:\s*[\d,.]+\s*%?/gi, '');
-      text = text.replace(/\*\*IO\*\*:\s*[\d,.]+\s*%?\s*\|?\s*/gi, '');
-      // Remove backtick-wrapped market cap
-      text = text.replace(/\s*`\s*[\d,.]+\s*[KMBkmb]\s*`/g, '');
-      text = text.replace(/\s*\bMC:\s*[\d,.]+\s*[KMBkmb]\b/gi, '');
-
-      // Extract country: :flag_xx: format
-      if (!extractedCountry) {
-        const countryMatch = text.match(/:flag_([a-z]{2}):/i);
-        if (countryMatch) extractedCountry = countryMatch[1].toUpperCase();
-      }
-      // Remove :flag_xx: country markers from the message text
-      text = text.replace(/\s*:flag_[a-z]{2}:\s*/gi, ' ');
-      // Remove Unicode flag emojis (regional indicator pairs) and surrounding pipes/tilde
-      text = text.replace(/\s*[\u{1F1E0}-\u{1F1FF}]{2}\s*/gu, ' ');
-      // Clean up leftover tilde separator
-      text = text.replace(/\s*~\s*\|?\s*/g, ' ');
-      // Remove empty bold blocks (** **) and trim
-      text = text.replace(/\*\*\s*\*\*/g, '').trim();
-      // Remove backtick-wrapped time at the beginning (e.g. `08:30`)
-      text = text.replace(/^\s*`\d{1,2}:\d{2}`\s*/, '');
-      // Remove arrow indicators (↑ ↓) at the beginning
-      text = text.replace(/^\s*[↑↓]\s*/, '');
-
-      text = formatDiscordText(text);
-      const urls = safeParseJSON(item.urls_json, []);
-
-      const receivedTime = formatTimeHMS(item.original_timestamp);
-
-      return `
-        <div class="news-card" style="border-left-color: var(--accent)">
-          <div class="news-card-header">
-            <div style="display:flex;gap:6px;align-items:center">
-              <span class="news-card-time">${receivedTime}</span>
-              ${extractedMC ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedMC)}">Cap: ${escapeHtml(extractedMC)}</span>` : ''}
-              ${extractedFloat ? `<span class="market-cap-badge" style="color:${valueTierColor(extractedFloat)}">Float: ${escapeHtml(extractedFloat)}</span>` : ''}
-              ${extractedIO ? `<span class="market-cap-badge">IO: ${escapeHtml(extractedIO)}</span>` : ''}
-              ${extractedCountry ? `<span class="country-badge">${escapeHtml(extractedCountry)}</span>` : ''}
-            </div>
-            <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(item.source_type || '')}</span>
-          </div>
-          <div class="news-card-body" style="color:#ffffff">${text}</div>
-          ${urls.length > 0 ? `<div class="news-card-urls">${urls.map(u => `<a href="${escapeHtml(u)}" target="_blank">${escapeHtml(u)}</a>`).join(' ')}</div>` : ''}
-          <div class="news-card-footer">
-            <button class="timestamps-toggle" onclick="this.parentElement.querySelector('.news-card-timestamps').classList.toggle('show');this.classList.toggle('open')">▶ times</button>
-            <button class="btn btn-small btn-primary send-to-api-btn" data-item-id="${item.id}">Send to API Testing</button>
-            <div class="news-card-timestamps">
-              <span>Received: ${formatTimestamp(item.original_timestamp)}</span>
-              <span>Ingested: ${formatTimestamp(item.ingested_at)}</span>
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-  });
-
-  // Wire "Send to API Testing" buttons
-  list.querySelectorAll('.send-to-api-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const itemId = parseInt(btn.dataset.itemId);
-      const item = items.find(i => i.id === itemId);
-      if (item) sendNewsItemToApiTesting(item);
-    });
-  });
+  if (list.children.length === 0 || existingIds.size === 0) {
+    // First render — show initial batch
+    list.innerHTML = '';
+    allNewsRendered = 0;
+    renderAllNewsPage(list, 0, ALL_NEWS_INITIAL);
+  } else if (newAtTop.length > 0) {
+    // Prepend new cards smoothly
+    const scrollTop = list.scrollTop;
+    const frag = document.createDocumentFragment();
+    for (const item of newAtTop.reverse()) {
+      const temp = document.createElement('div');
+      temp.innerHTML = buildAllNewsCard(item);
+      frag.appendChild(temp.firstElementChild);
+    }
+    list.insertBefore(frag, list.firstChild);
+    wireAllNewsButtons(list);
+    allNewsRendered += newAtTop.length;
+    // Trim excess from bottom
+    while (list.children.length > allNewsRendered) {
+      list.removeChild(list.lastChild);
+    }
+    if (scrollTop > 0) list.scrollTop = scrollTop;
+  }
 }
+
+// Lazy load on scroll for All News
+document.getElementById('all-news-list').addEventListener('scroll', function() {
+  const list = this;
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
+    if (allNewsRendered < allNewsItems.length) {
+      renderAllNewsPage(list, allNewsRendered, ALL_NEWS_PAGE);
+    }
+  }
+});
 
 function sendNewsItemToApiTesting(newsItem) {
   // Build a pseudo feed-item from a raw news item so API Testing can handle it
@@ -717,6 +906,41 @@ function renderRulesetsList(rulesets) {
   });
 }
 
+// ── Source Checkboxes ──
+let cachedAvailableSources = null;
+
+async function populateSourceCheckboxes(enabledKeys = ['discord']) {
+  if (!cachedAvailableSources) {
+    cachedAvailableSources = await window.api.getAvailableSources();
+  }
+  const container = document.getElementById('sources-checkboxes');
+  container.innerHTML = cachedAvailableSources.map(s => `
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;color:var(--text-primary)">
+      <input type="checkbox" data-source-key="${escapeHtml(s.key)}" ${enabledKeys.includes(s.key) ? 'checked' : ''} />
+      ${escapeHtml(s.name)}
+    </label>
+  `).join('');
+}
+
+document.getElementById('sources-search').addEventListener('input', (e) => {
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll('#sources-checkboxes label').forEach(label => {
+    label.style.display = label.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+});
+
+document.getElementById('sources-select-all').addEventListener('click', () => {
+  document.querySelectorAll('#sources-checkboxes input[type="checkbox"]').forEach(cb => {
+    if (cb.closest('label').style.display !== 'none') cb.checked = true;
+  });
+});
+
+document.getElementById('sources-select-none').addEventListener('click', () => {
+  document.querySelectorAll('#sources-checkboxes input[type="checkbox"]').forEach(cb => {
+    if (cb.closest('label').style.display !== 'none') cb.checked = false;
+  });
+});
+
 function openEditor(ruleset = null) {
   const editor = document.getElementById('ruleset-editor');
   editor.style.display = 'flex';
@@ -732,8 +956,7 @@ function openEditor(ruleset = null) {
     updateAudioUI();
 
     const sources = (ruleset.sources || 'discord').split(',').map(s => s.trim());
-    document.getElementById('source-discord').checked = sources.includes('discord');
-    document.getElementById('source-truth').checked = sources.includes('truth');
+    populateSourceCheckboxes(sources);
 
     renderRuleGroups(ruleset.rules || []);
     renderExclusions(ruleset.exclusions || []);
@@ -746,8 +969,7 @@ function openEditor(ruleset = null) {
     document.getElementById('ruleset-name').value = '';
     document.getElementById('ruleset-color').value = '#ff6b6b';
     document.getElementById('color-preview').style.background = '#ff6b6b';
-    document.getElementById('source-discord').checked = true;
-    document.getElementById('source-truth').checked = false;
+    populateSourceCheckboxes(['discord']);
     audioFilePath = null;
     audioFileName = null;
     updateAudioUI();
@@ -932,8 +1154,9 @@ function collectRulesetFromForm() {
   const llmScoringThreshold = parseInt(document.getElementById('llm-scoring-threshold').value) || 0;
 
   const sourceParts = [];
-  if (document.getElementById('source-discord').checked) sourceParts.push('discord');
-  if (document.getElementById('source-truth').checked) sourceParts.push('truth');
+  document.querySelectorAll('#sources-checkboxes input[type="checkbox"]:checked').forEach(cb => {
+    sourceParts.push(cb.dataset.sourceKey);
+  });
   const sources = sourceParts.join(',') || 'discord';
 
   return {
@@ -1183,8 +1406,7 @@ function renderLLMQueue(items) {
     return;
   }
 
-  preserveScroll(list, () => {
-    list.innerHTML = items.map(item => `
+  const llmHtml = items.map(item => `
       <div class="llm-queue-item status-${item.status} ${selectedLLMItemId === item.id ? 'active' : ''}" data-id="${item.id}">
         <div class="llm-queue-item-body">
           <div class="llm-queue-item-header">
@@ -1204,20 +1426,21 @@ function renderLLMQueue(items) {
         </div>
       </div>
     `).join('');
-  });
-
-  list.querySelectorAll('.llm-queue-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const id = parseInt(el.dataset.id);
-      const item = items.find(i => i.id === id);
-      if (item) {
-        selectedLLMItemId = id;
-        list.querySelectorAll('.llm-queue-item').forEach(e => e.classList.remove('active'));
-        el.classList.add('active');
-        renderLLMDetail(item);
-      }
+  if (updateIfChanged(list, llmHtml)) {
+    // Re-attach click handlers only if DOM changed
+    list.querySelectorAll('.llm-queue-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.id);
+        const item = items.find(i => i.id === id);
+        if (item) {
+          selectedLLMItemId = id;
+          list.querySelectorAll('.llm-queue-item').forEach(e => e.classList.remove('active'));
+          el.classList.add('active');
+          renderLLMDetail(item);
+        }
+      });
     });
-  });
+  }
 }
 
 function renderLLMDetail(item) {
@@ -1318,8 +1541,7 @@ function renderApiTestingList(items) {
     return;
   }
 
-  preserveScroll(list, () => {
-    list.innerHTML = items.map(item => `
+  const apiHtml = items.map(item => `
       <div class="llm-queue-item ${selectedApiItem && selectedApiItem.feed_id === item.feed_id ? 'active' : ''}" data-feed-id="${item.feed_id}" style="border-left-color:${item.ruleset_color || 'var(--accent)'}">
         <div class="llm-queue-item-body">
           <div class="llm-queue-item-header">
@@ -1334,20 +1556,21 @@ function renderApiTestingList(items) {
         </div>
       </div>
     `).join('');
-  });
 
-  list.querySelectorAll('.llm-queue-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const feedId = parseInt(el.dataset.feedId);
-      const item = items.find(i => i.feed_id === feedId);
-      if (item) {
-        selectedApiItem = item;
-        list.querySelectorAll('.llm-queue-item').forEach(e => e.classList.remove('active'));
-        el.classList.add('active');
-        renderApiTestingDetail(item);
-      }
+  if (updateIfChanged(list, apiHtml)) {
+    list.querySelectorAll('.llm-queue-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const feedId = parseInt(el.dataset.feedId);
+        const item = items.find(i => i.feed_id === feedId);
+        if (item) {
+          selectedApiItem = item;
+          list.querySelectorAll('.llm-queue-item').forEach(e => e.classList.remove('active'));
+          el.classList.add('active');
+          renderApiTestingDetail(item);
+        }
+      });
     });
-  });
+  }
 }
 
 async function renderApiTestingDetail(item) {
@@ -1597,6 +1820,77 @@ function preserveScroll(el, fn) {
   const scrollTop = el.scrollTop;
   fn();
   el.scrollTop = scrollTop;
+}
+
+/**
+ * Smart DOM update: only replace innerHTML if content actually changed.
+ * Prevents flicker from identical re-renders.
+ */
+function updateIfChanged(el, newHtml) {
+  if (el._lastHtml === newHtml) return false;
+  el._lastHtml = newHtml;
+  const scrollTop = el.scrollTop;
+  el.innerHTML = newHtml;
+  el.scrollTop = scrollTop;
+  return true;
+}
+
+/**
+ * Incremental list update: prepend new cards, remove excess old ones.
+ * Uses data-card-id attribute to track which items are already in DOM.
+ * Returns true if any new items were added.
+ */
+function incrementalUpdate(listEl, cardHtmls, cardIds) {
+  // Build set of IDs already in DOM
+  const existingIds = new Set();
+  for (const child of listEl.children) {
+    const cid = child.dataset.cardId;
+    if (cid) existingIds.add(cid);
+  }
+
+  // Find new cards not yet in DOM
+  const newCards = [];
+  for (let i = 0; i < cardIds.length; i++) {
+    if (!existingIds.has(cardIds[i])) {
+      newCards.push({ id: cardIds[i], html: cardHtmls[i], index: i });
+    }
+  }
+
+  if (newCards.length === 0 && listEl.children.length === cardIds.length) {
+    return false; // nothing changed
+  }
+
+  // If this is the first render or the list is empty, do a full set
+  if (listEl.children.length === 0 || newCards.length > 10) {
+    listEl.innerHTML = cardHtmls.join('');
+    return true;
+  }
+
+  // Prepend new cards at the top (they appear at lower indices = newer)
+  const scrollTop = listEl.scrollTop;
+  const frag = document.createDocumentFragment();
+  for (const nc of newCards) {
+    const temp = document.createElement('div');
+    temp.innerHTML = nc.html;
+    const card = temp.firstElementChild;
+    frag.appendChild(card);
+  }
+  if (frag.children.length > 0) {
+    listEl.insertBefore(frag, listEl.firstChild);
+  }
+
+  // Trim excess cards from bottom if list grew beyond expected size
+  const maxCards = cardIds.length;
+  while (listEl.children.length > maxCards) {
+    listEl.removeChild(listEl.lastChild);
+  }
+
+  // Preserve scroll position — shift down by the height of new cards
+  if (scrollTop > 0 && newCards.length > 0) {
+    listEl.scrollTop = scrollTop;
+  }
+
+  return newCards.length > 0;
 }
 
 // ── Utilities ──
